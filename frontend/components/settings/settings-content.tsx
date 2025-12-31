@@ -1,7 +1,7 @@
 "use client"
 
-import { useState } from "react"
-import { mockUser } from "@/lib/mock-data"
+import { useState, useEffect } from "react"
+import { useAuth } from "@/lib/auth"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -79,14 +79,21 @@ const mockWebhooks: WebhookItem[] = [
 ]
 
 export function SettingsContent() {
+  const { user } = useAuth()
   const [activeTab, setActiveTab] = useState<Tab>("profile")
   const [isLoading, setIsLoading] = useState(false)
-  const [name, setName] = useState(mockUser.name)
+  const [name, setName] = useState("")
   const [apiKeys] = useState(mockApiKeys)
   const [revealedKey, setRevealedKey] = useState<string | null>(null)
   const [copiedKey, setCopiedKey] = useState<string | null>(null)
   const [webhooks, setWebhooks] = useState(mockWebhooks)
   const [twoFAEnabled, setTwoFAEnabled] = useState(false)
+
+  useEffect(() => {
+    if (user) {
+      setName(user.name)
+    }
+  }, [user])
 
   const tabs = [
     { id: "profile" as Tab, label: "Perfil", icon: User },
@@ -147,12 +154,12 @@ export function SettingsContent() {
           <div className="flex items-center gap-6">
             <div className="relative group">
               <Avatar className="w-24 h-24 ring-4 ring-white/[0.08]">
-                <AvatarImage src={mockUser.avatar || "/placeholder.svg"} />
+                <AvatarImage src="/placeholder.svg" />
                 <AvatarFallback className="bg-primary/20 text-primary text-2xl font-medium">
-                  {mockUser.name
-                    .split(" ")
+                  {user?.name
+                    ?.split(" ")
                     .map((n) => n[0])
-                    .join("")}
+                    .join("") || "U"}
                 </AvatarFallback>
               </Avatar>
               <div className="absolute inset-0 rounded-full bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer">
@@ -180,11 +187,23 @@ export function SettingsContent() {
             <div className="space-y-2">
               <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Email</Label>
               <Input
-                value={mockUser.email}
+                value={user?.email || ""}
                 disabled
                 className="h-11 bg-white/[0.02] border-white/[0.06] text-muted-foreground"
               />
               <p className="text-xs text-muted-foreground">O email não pode ser alterado</p>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Plano</Label>
+              <div className="flex items-center gap-3">
+                <span className="px-3 py-1.5 text-sm rounded-lg bg-primary/15 text-primary font-medium capitalize">
+                  {user?.plan || "free"}
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {user?.maxLinks || 10} links máximos
+                </span>
+              </div>
             </div>
           </div>
 

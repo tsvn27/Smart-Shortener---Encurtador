@@ -108,12 +108,12 @@ export function generateToken(userId: string): string {
 
 export async function hashPassword(password: string): Promise<string> {
   const bcrypt = await import('bcryptjs');
-  return bcrypt.hash(password, 12);
+  return bcrypt.default.hash(password, 12);
 }
 
 export async function verifyPassword(password: string, hash: string): Promise<boolean> {
   const bcrypt = await import('bcryptjs');
-  return bcrypt.compare(password, hash);
+  return bcrypt.default.compare(password, hash);
 }
 
 function rowToUser(row: UserRow): User {

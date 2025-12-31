@@ -1,11 +1,11 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import Link from "next/link"
-import { Search, Filter, Grid3X3, List, PlusCircle, X, Link2 } from "lucide-react"
+import { Search, Filter, Grid3X3, List, PlusCircle, X, Link2, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { mockLinks } from "@/lib/mock-data"
+import { api, Link as LinkType } from "@/lib/api"
 import { LinkCard } from "./link-card"
 import { cn } from "@/lib/utils"
 
@@ -13,20 +13,44 @@ type ViewMode = "grid" | "list"
 type StatusFilter = "all" | "active" | "paused" | "expired"
 
 export function LinksContent() {
+  const [links, setLinks] = useState<LinkType[]>([])
+  const [isLoading, setIsLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState("")
   const [viewMode, setViewMode] = useState<ViewMode>("grid")
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
 
-  const filteredLinks = mockLinks.filter((link) => {
+  useEffect(() => {
+    async function loadLinks() {
+      try {
+        const res = await api.getLinks(100, 0)
+        setLinks(res.data)
+      } catch (error) {
+        console.error("Failed to load links:", error)
+      } finally {
+        setIsLoading(false)
+      }
+    }
+    loadLinks()
+  }, [])
+
+  const filteredLinks = links.filter((link) => {
     const matchesSearch =
       link.shortCode.toLowerCase().includes(searchQuery.toLowerCase()) ||
       link.originalUrl.toLowerCase().includes(searchQuery.toLowerCase()) ||
       link.tags.some((tag) => tag.toLowerCase().includes(searchQuery.toLowerCase()))
 
-    const matchesStatus = statusFilter === "all" || link.status === statusFilter
+    const matchesStatus = statusFilter === "all" || link.state === statusFilter
 
     return matchesSearch && matchesStatus
   })
+
+  if (isLoading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-8">
@@ -34,7 +58,7 @@ export function LinksContent() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-fade-in">
         <div>
           <h1 className="text-3xl font-semibold text-gradient">Links</h1>
-          <p className="text-muted-foreground mt-1 text-sm">{mockLinks.length} links criados</p>
+          <p className="text-muted-foreground mt-1 text-sm">{links.length} links criados</p>
         </div>
 
         <Link href="/links/new">
@@ -127,20 +151,34 @@ export function LinksContent() {
           <div className="w-20 h-20 mx-auto mb-6 rounded-2xl bg-white/[0.04] flex items-center justify-center border border-white/[0.06]">
             <Link2 className="w-10 h-10 text-muted-foreground" />
           </div>
-          <h3 className="text-xl font-semibold text-foreground mb-2">Nenhum link encontrado</h3>
+          <h3 className="text-xl font-semibold text-foreground mb-2">
+            {links.length === 0 ? "Nenhum link criado" : "Nenhum link encontrado"}
+          </h3>
           <p className="text-sm text-muted-foreground mb-8 max-w-sm mx-auto">
-            Tente ajustar sua busca ou filtros para encontrar o que procura
+            {links.length === 0 
+              ? "Crie seu primeiro link para começar a rastrear cliques"
+              : "Tente ajustar sua busca ou filtros para encontrar o que procura"
+            }
           </p>
-          <Button
-            variant="outline"
-            onClick={() => {
-              setSearchQuery("")
-              setStatusFilter("all")
-            }}
-            className="border-white/[0.08] hover:bg-white/[0.04] bg-transparent"
-          >
-            Limpar filtros
-          </Button>
+          {links.length === 0 ? (
+            <Link href="/links/new">
+              <Button className="gap-2">
+                <PlusCircle className="w-4 h-4" />
+                Criar primeiro link
+              </Button>
+            </Link>
+          ) : (
+            <Button
+              variant="outline"
+              onClick={() => {
+                setSearchQuery("")
+                setStatusFilter("all")
+              }}
+              className="border-white/[0.08] hover:bg-white/[0.04] bg-transparent"
+            >
+              Limpar filtros
+            </Button>
+          )}
         </div>
       ) : (
         <div

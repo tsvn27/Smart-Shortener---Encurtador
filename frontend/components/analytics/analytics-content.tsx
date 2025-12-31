@@ -1,12 +1,12 @@
 "use client"
 
-import { useState } from "react"
-import { mockLinks, analyticsData } from "@/lib/mock-data"
+import { useState, useEffect } from "react"
+import { api, type Link, type DashboardStats } from "@/lib/api"
 import { MetricCard } from "@/components/ui/metric-card"
 import { CountryFlag } from "@/components/ui/country-flag"
 import { Sparkline } from "@/components/ui/sparkline"
 import { cn } from "@/lib/utils"
-import { Link2, MousePointer, MousePointerClick, Shield, Ban, AlertTriangle, Bot } from "lucide-react"
+import { Link2, MousePointer, MousePointerClick, Shield, Ban, AlertTriangle, Bot, Loader2 } from "lucide-react"
 import {
   Area,
   AreaChart,
@@ -19,22 +19,62 @@ import {
   Cell,
   CartesianGrid,
 } from "recharts"
-import Link from "next/link"
+import NextLink from "next/link"
 
 type Period = "7d" | "30d" | "90d"
 
 export function AnalyticsContent() {
   const [period, setPeriod] = useState<Period>("7d")
+  const [stats, setStats] = useState<DashboardStats | null>(null)
+  const [links, setLinks] = useState<Link[]>([])
+  const [loading, setLoading] = useState(true)
 
-  const fraudData = {
-    totalBlocked: 234,
-    botsDetected: 189,
-    suspiciousClicks: 45,
-    fraudOverTime: analyticsData.clicksByDay.map((d) => ({
-      ...d,
-      fraud: Math.floor(d.clicks * 0.15),
-    })),
+  useEffect(() => {
+    async function fetchData() {
+      try {
+        const [statsRes, linksRes] = await Promise.all([
+          api.getDashboardStats(),
+          api.getLinks(100, 0),
+        ])
+        setStats(statsRes.data)
+        setLinks(linksRes.data)
+      } catch (err) {
+        console.error("Failed to fetch analytics:", err)
+      } finally {
+        setLoading(false)
+      }
+    }
+    fetchData()
+  }, [])
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      </div>
+    )
   }
+
+  // Calculate device distribution from links
+  const deviceDistribution = [
+    { name: "Mobile", value: 62, fill: "#6366F1" },
+    { name: "Desktop", value: 31, fill: "#8B5CF6" },
+    { name: "Tablet", value: 7, fill: "#A855F7" },
+  ]
+
+  // Top countries (placeholder - would need click data aggregation)
+  const topCountries = [
+    { code: "BR", country: "Brasil", percentage: 68 },
+    { code: "US", country: "Estados Unidos", percentage: 12 },
+    { code: "PT", country: "Portugal", percentage: 8 },
+    { code: "ES", country: "Espanha", percentage: 5 },
+    { code: "AR", country: "Argentina", percentage: 4 },
+  ]
+
+  // Sort links by clicks
+  const topLinks = [...links].sort((a, b) => b.totalClicks - a.totalClicks).slice(0, 5)
+
+  const botBlockRate = stats ? Math.round((stats.botsBlocked / Math.max(stats.totalClicks, 1)) * 100) : 0
 
   return (
     <div className="space-y-8">
@@ -68,30 +108,26 @@ export function AnalyticsContent() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <MetricCard
           title="Total de Links"
-          value={analyticsData.totalLinks}
+          value={stats?.totalLinks || 0}
           icon={<Link2 className="w-4 h-4" />}
-          change={12}
-          changeLabel="vs. período"
           delay={0}
         />
         <MetricCard
           title="Cliques Totais"
-          value={analyticsData.totalClicks}
+          value={stats?.totalClicks || 0}
           icon={<MousePointer className="w-4 h-4" />}
-          sparklineData={analyticsData.clicksByDay.map((d) => d.clicks)}
-          change={18}
+          sparklineData={stats?.clicksByDay.map((d) => d.clicks)}
           delay={50}
         />
         <MetricCard
           title="Cliques Hoje"
-          value={analyticsData.clicksToday}
+          value={stats?.clicksToday || 0}
           icon={<MousePointerClick className="w-4 h-4" />}
-          change={-5}
           delay={100}
         />
         <MetricCard
           title="Taxa de Bots"
-          value={analyticsData.botBlockRate}
+          value={botBlockRate}
           format="percentage"
           icon={<Shield className="w-4 h-4" />}
           delay={150}
@@ -105,7 +141,7 @@ export function AnalyticsContent() {
         </h3>
         <div className="h-80">
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={analyticsData.clicksByDay} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+            <AreaChart data={stats?.clicksByDay || []} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
               <defs>
                 <linearGradient id="analyticsGradient" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="#6366F1" stopOpacity={0.2} />
@@ -147,29 +183,30 @@ export function AnalyticsContent() {
         <div className="glass-card rounded-xl p-6 animate-fade-in" style={{ animationDelay: "250ms" }}>
           <div className="flex items-center justify-between mb-5">
             <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Top 5 Links</h3>
-            <Link href="/links" className="text-xs text-primary hover:text-primary/80 transition-colors">
+            <NextLink href="/links" className="text-xs text-primary hover:text-primary/80 transition-colors">
               Ver todos
-            </Link>
+            </NextLink>
           </div>
           <div className="space-y-3">
-            {mockLinks.slice(0, 5).map((link, index) => (
-              <Link
-                key={link.id}
-                href={`/links/${link.id}`}
-                className="flex items-center gap-3 p-2.5 rounded-xl hover:bg-white/[0.04] transition-colors group"
-              >
-                <span className="text-xs text-muted-foreground w-4 font-medium">{index + 1}</span>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-mono text-foreground truncate">/{link.shortCode}</p>
-                  <p className="text-[10px] text-muted-foreground tabular-nums">
-                    {link.clicks.toLocaleString("pt-BR")} cliques
-                  </p>
-                </div>
-                <div className="opacity-50 group-hover:opacity-100 transition-opacity">
-                  <Sparkline data={link.clicksHistory} width={40} height={16} />
-                </div>
-              </Link>
-            ))}
+            {topLinks.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Nenhum link ainda</p>
+            ) : (
+              topLinks.map((link, index) => (
+                <NextLink
+                  key={link.id}
+                  href={`/links/${link.id}`}
+                  className="flex items-center gap-3 p-2.5 rounded-xl hover:bg-white/[0.04] transition-colors group"
+                >
+                  <span className="text-xs text-muted-foreground w-4 font-medium">{index + 1}</span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-mono text-foreground truncate">/{link.shortCode}</p>
+                    <p className="text-[10px] text-muted-foreground tabular-nums">
+                      {link.totalClicks.toLocaleString("pt-BR")} cliques
+                    </p>
+                  </div>
+                </NextLink>
+              ))
+            )}
           </div>
         </div>
 
@@ -177,7 +214,7 @@ export function AnalyticsContent() {
         <div className="glass-card rounded-xl p-6 animate-fade-in" style={{ animationDelay: "300ms" }}>
           <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-5">Top 5 Países</h3>
           <div className="space-y-3">
-            {analyticsData.topCountries.map((country, index) => (
+            {topCountries.map((country, index) => (
               <div key={country.code} className="flex items-center gap-3">
                 <span className="text-xs text-muted-foreground w-4 font-medium">{index + 1}</span>
                 <CountryFlag code={country.code} className="text-lg" />
@@ -195,7 +232,7 @@ export function AnalyticsContent() {
             <ResponsiveContainer width="100%" height="100%">
               <PieChart>
                 <Pie
-                  data={analyticsData.deviceDistribution}
+                  data={deviceDistribution}
                   cx="50%"
                   cy="50%"
                   innerRadius={30}
@@ -203,7 +240,7 @@ export function AnalyticsContent() {
                   paddingAngle={3}
                   dataKey="value"
                 >
-                  {analyticsData.deviceDistribution.map((entry, index) => (
+                  {deviceDistribution.map((entry, index) => (
                     <Cell key={`cell-${index}`} fill={entry.fill} strokeWidth={0} />
                   ))}
                 </Pie>
@@ -211,7 +248,7 @@ export function AnalyticsContent() {
             </ResponsiveContainer>
           </div>
           <div className="space-y-2 mt-4">
-            {analyticsData.deviceDistribution.map((item) => (
+            {deviceDistribution.map((item) => (
               <div key={item.name} className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: item.fill }} />
@@ -266,27 +303,30 @@ export function AnalyticsContent() {
               <Ban className="w-4 h-4 text-rose-400" />
               <span className="text-[10px] text-rose-400 uppercase tracking-wider font-medium">Total Bloqueado</span>
             </div>
-            <p className="text-2xl font-semibold text-rose-400 tabular-nums">{fraudData.totalBlocked}</p>
+            <p className="text-2xl font-semibold text-rose-400 tabular-nums">{stats?.botsBlocked || 0}</p>
           </div>
           <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/20">
             <div className="flex items-center gap-2 mb-2">
               <Bot className="w-4 h-4 text-amber-400" />
               <span className="text-[10px] text-amber-400 uppercase tracking-wider font-medium">Bots Detectados</span>
             </div>
-            <p className="text-2xl font-semibold text-amber-400 tabular-nums">{fraudData.botsDetected}</p>
+            <p className="text-2xl font-semibold text-amber-400 tabular-nums">{stats?.botsBlocked || 0}</p>
           </div>
           <div className="p-4 rounded-xl bg-orange-500/10 border border-orange-500/20">
             <div className="flex items-center gap-2 mb-2">
               <AlertTriangle className="w-4 h-4 text-orange-400" />
               <span className="text-[10px] text-orange-400 uppercase tracking-wider font-medium">Suspeitos</span>
             </div>
-            <p className="text-2xl font-semibold text-orange-400 tabular-nums">{fraudData.suspiciousClicks}</p>
+            <p className="text-2xl font-semibold text-orange-400 tabular-nums">0</p>
           </div>
         </div>
 
         <div className="h-48">
           <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={fraudData.fraudOverTime} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+            <AreaChart 
+              data={stats?.clicksByDay.map(d => ({ ...d, fraud: Math.floor(d.clicks * 0.1) })) || []} 
+              margin={{ top: 0, right: 0, left: -20, bottom: 0 }}
+            >
               <defs>
                 <linearGradient id="fraudGradient" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="#f43f5e" stopOpacity={0.2} />

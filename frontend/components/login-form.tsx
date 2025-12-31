@@ -8,26 +8,49 @@ import { Logo } from "@/components/ui/logo"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Eye, EyeOff, Loader2, Key, ArrowRight, Sparkles } from "lucide-react"
+import { Eye, EyeOff, Loader2, Key, ArrowRight } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { useAuth } from "@/lib/auth"
 
 export function LoginForm() {
   const router = useRouter()
+  const { login, register, isAuthenticated } = useAuth()
   const [showPassword, setShowPassword] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [showApiKey, setShowApiKey] = useState(false)
+  const [isRegister, setIsRegister] = useState(false)
   const [mounted, setMounted] = useState(false)
   const [focusedField, setFocusedField] = useState<string | null>(null)
+  const [error, setError] = useState("")
+  
+  const [name, setName] = useState("")
+  const [email, setEmail] = useState("")
+  const [password, setPassword] = useState("")
 
   useEffect(() => {
     setMounted(true)
-  }, [])
+    if (isAuthenticated) {
+      router.push("/dashboard")
+    }
+  }, [isAuthenticated, router])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsLoading(true)
-    await new Promise((resolve) => setTimeout(resolve, 1200))
-    router.push("/dashboard")
+    setError("")
+    
+    try {
+      if (isRegister) {
+        await register(name, email, password)
+      } else {
+        await login(email, password)
+      }
+      router.push("/dashboard")
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erro ao fazer login")
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   if (showApiKey) {
@@ -144,9 +167,20 @@ export function LoginForm() {
               mounted ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4",
             )}
           >
-            <h1 className="text-2xl font-semibold text-gradient">Bem-vindo de volta</h1>
-            <p className="text-sm text-muted-foreground">Entre para gerenciar seus links</p>
+            <h1 className="text-2xl font-semibold text-gradient">
+              {isRegister ? "Criar conta" : "Bem-vindo de volta"}
+            </h1>
+            <p className="text-sm text-muted-foreground">
+              {isRegister ? "Preencha os dados para criar sua conta" : "Entre para gerenciar seus links"}
+            </p>
           </div>
+
+          {/* Error */}
+          {error && (
+            <div className="p-3 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-400 text-sm">
+              {error}
+            </div>
+          )}
 
           {/* Form */}
           <form
@@ -156,6 +190,28 @@ export function LoginForm() {
               mounted ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4",
             )}
           >
+            {isRegister && (
+              <div className="space-y-2">
+                <Label htmlFor="name" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                  Nome
+                </Label>
+                <Input
+                  id="name"
+                  type="text"
+                  placeholder="Seu nome"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  onFocus={() => setFocusedField("name")}
+                  onBlur={() => setFocusedField(null)}
+                  className={cn(
+                    "h-12 bg-white/[0.03] border-white/[0.08] transition-all duration-200",
+                    focusedField === "name" &&
+                      "border-primary/50 bg-white/[0.05] shadow-[0_0_20px_rgba(99,102,241,0.1)]",
+                  )}
+                />
+              </div>
+            )}
+            
             <div className="space-y-2">
               <Label htmlFor="email" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
                 Email
@@ -164,7 +220,8 @@ export function LoginForm() {
                 id="email"
                 type="email"
                 placeholder="seu@email.com"
-                defaultValue="joao@example.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
                 onFocus={() => setFocusedField("email")}
                 onBlur={() => setFocusedField(null)}
                 className={cn(
@@ -183,16 +240,19 @@ export function LoginForm() {
                 >
                   Senha
                 </Label>
-                <button type="button" className="text-xs text-primary/80 hover:text-primary transition-colors">
-                  Esqueceu a senha?
-                </button>
+                {!isRegister && (
+                  <button type="button" className="text-xs text-primary/80 hover:text-primary transition-colors">
+                    Esqueceu a senha?
+                  </button>
+                )}
               </div>
               <div className="relative">
                 <Input
                   id="password"
                   type={showPassword ? "text" : "password"}
                   placeholder="••••••••"
-                  defaultValue="password123"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
                   onFocus={() => setFocusedField("password")}
                   onBlur={() => setFocusedField(null)}
                   className={cn(
@@ -220,11 +280,11 @@ export function LoginForm() {
                 {isLoading ? (
                   <>
                     <Loader2 className="w-4 h-4 animate-spin" />
-                    Entrando...
+                    {isRegister ? "Criando conta..." : "Entrando..."}
                   </>
                 ) : (
                   <>
-                    Entrar
+                    {isRegister ? "Criar conta" : "Entrar"}
                     <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
                   </>
                 )}
@@ -261,9 +321,12 @@ export function LoginForm() {
               mounted ? "opacity-100" : "opacity-0",
             )}
           >
-            Não tem conta?{" "}
-            <button className="text-primary hover:text-primary/80 font-medium transition-colors">
-              Criar conta grátis
+            {isRegister ? "Já tem conta?" : "Não tem conta?"}{" "}
+            <button 
+              onClick={() => { setIsRegister(!isRegister); setError(""); }}
+              className="text-primary hover:text-primary/80 font-medium transition-colors"
+            >
+              {isRegister ? "Fazer login" : "Criar conta grátis"}
             </button>
           </p>
         </div>

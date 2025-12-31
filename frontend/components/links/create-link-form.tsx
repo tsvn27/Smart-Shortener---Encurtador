@@ -23,9 +23,11 @@ import {
   Clock,
   ArrowRight,
   Check,
+  AlertCircle,
 } from "lucide-react"
 import Link from "next/link"
 import { cn } from "@/lib/utils"
+import { api, type RedirectRule, type RuleCondition } from "@/lib/api"
 
 interface SmartRule {
   id: string
@@ -51,6 +53,7 @@ const operatorOptions = [
 export function CreateLinkForm() {
   const router = useRouter()
   const [isLoading, setIsLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
   const [url, setUrl] = useState("")
   const [customCode, setCustomCode] = useState("")
   const [rules, setRules] = useState<SmartRule[]>([])
@@ -101,8 +104,52 @@ export function CreateLinkForm() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsLoading(true)
-    await new Promise((resolve) => setTimeout(resolve, 1500))
-    router.push("/links")
+    setError(null)
+    
+    try {
+      // Convert smart rules to API format
+      const apiRules: RedirectRule[] = rules
+        .filter(r => r.value && r.redirectUrl)
+        .map((rule, index) => {
+          const operatorMap: Record<string, RuleCondition["operator"]> = {
+            "=": "eq",
+            "!=": "neq",
+            "contains": "contains",
+          }
+          return {
+            id: rule.id,
+            priority: index + 1,
+            conditions: [{
+              field: rule.field,
+              operator: operatorMap[rule.operator],
+              value: rule.value,
+            }],
+            targetUrl: rule.redirectUrl,
+            active: true,
+          }
+        })
+      
+      // Build limits object
+      const limits: Record<string, unknown> = {}
+      if (maxClicks) limits.maxClicks = parseInt(maxClicks)
+      if (maxClicksPerDay) limits.maxClicksPerDay = parseInt(maxClicksPerDay)
+      if (expiresAt) limits.expiresAt = new Date(expiresAt).toISOString()
+      
+      await api.createLink({
+        url,
+        customCode: customCode || undefined,
+        rules: apiRules.length > 0 ? apiRules : undefined,
+        limits: Object.keys(limits).length > 0 ? limits : undefined,
+        tags: tags.length > 0 ? tags : undefined,
+        campaign: campaign || undefined,
+      })
+      
+      router.push("/links")
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erro ao criar link")
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   return (
@@ -122,6 +169,14 @@ export function CreateLinkForm() {
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-5">
+        {/* Error message */}
+        {error && (
+          <div className="flex items-center gap-3 p-4 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-400 animate-fade-in">
+            <AlertCircle className="w-5 h-5 flex-shrink-0" />
+            <p className="text-sm">{error}</p>
+          </div>
+        )}
+
         {/* Section 1: Basic */}
         <div className="glass-card rounded-xl p-6 space-y-6 animate-fade-in" style={{ animationDelay: "50ms" }}>
           <div className="flex items-center gap-3">

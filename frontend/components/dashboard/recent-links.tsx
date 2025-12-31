@@ -1,9 +1,8 @@
 "use client"
 
 import Link from "next/link"
-import type { Link as LinkType } from "@/lib/mock-data"
+import type { Link as LinkType } from "@/lib/api"
 import { StatusBadge } from "@/components/ui/status-badge"
-import { Sparkline } from "@/components/ui/sparkline"
 import { ExternalLink, Copy, Check, ArrowRight } from "lucide-react"
 import { useState } from "react"
 import { cn } from "@/lib/utils"
@@ -21,10 +20,29 @@ export function RecentLinks({ links }: RecentLinksProps) {
     setTimeout(() => setCopiedId(null), 2000)
   }
 
-  const getDisplayStatus = (link: LinkType) => {
+  const getDisplayStatus = (link: LinkType): "active" | "paused" | "expired" | "viral" | "sick" => {
     if (link.clicksToday > 100) return "viral"
-    if (link.health < 60) return "sick"
-    return link.status
+    if (link.healthScore < 60) return "sick"
+    if (link.state === "active") return "active"
+    if (link.state === "paused") return "paused"
+    if (link.state === "expired") return "expired"
+    return "active"
+  }
+
+  if (links.length === 0) {
+    return (
+      <div className="glass-card rounded-xl p-6 animate-fade-in" style={{ animationDelay: "300ms" }}>
+        <div className="flex items-center justify-between mb-6">
+          <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Links Recentes</h3>
+        </div>
+        <div className="text-center py-8 text-muted-foreground">
+          <p className="text-sm">Nenhum link criado ainda</p>
+          <Link href="/links" className="text-primary text-sm hover:underline mt-2 inline-block">
+            Criar primeiro link →
+          </Link>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -69,15 +87,10 @@ export function RecentLinks({ links }: RecentLinksProps) {
               <p className="text-xs text-muted-foreground truncate mt-0.5 max-w-[180px]">{link.originalUrl}</p>
             </div>
 
-            {/* Sparkline */}
-            <div className="hidden sm:block opacity-50 group-hover:opacity-100 transition-opacity">
-              <Sparkline data={link.clicksHistory} width={60} height={20} />
-            </div>
-
             {/* Stats */}
             <div className="text-right min-w-[60px]">
               <p className="text-sm font-semibold text-foreground tabular-nums">
-                {link.clicks.toLocaleString("pt-BR")}
+                {link.totalClicks.toLocaleString("pt-BR")}
               </p>
               <p className="text-[10px] text-muted-foreground">cliques</p>
             </div>

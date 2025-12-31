@@ -4,9 +4,8 @@ import type React from "react"
 
 import { useState } from "react"
 import Link from "next/link"
-import type { Link as LinkType } from "@/lib/mock-data"
+import type { Link as LinkType } from "@/lib/api"
 import { StatusBadge } from "@/components/ui/status-badge"
-import { Sparkline } from "@/components/ui/sparkline"
 import { cn } from "@/lib/utils"
 import { Copy, Check, MoreHorizontal, ExternalLink, Pencil, Pause, Play, Trash2, BarChart3 } from "lucide-react"
 import {
@@ -33,10 +32,13 @@ export function LinkCard({ link, viewMode }: LinkCardProps) {
     setTimeout(() => setCopied(false), 2000)
   }
 
-  const getDisplayStatus = () => {
+  const getDisplayStatus = (): "active" | "paused" | "expired" | "viral" | "sick" => {
     if (link.clicksToday > 100) return "viral"
-    if (link.health < 60) return "sick"
-    return link.status
+    if (link.healthScore < 60) return "sick"
+    if (link.state === "active") return "active"
+    if (link.state === "paused") return "paused"
+    if (link.state === "expired") return "expired"
+    return "active"
   }
 
   const isViral = link.clicksToday > 100
@@ -77,14 +79,11 @@ export function LinkCard({ link, viewMode }: LinkCardProps) {
           ))}
         </div>
 
-        {/* Sparkline */}
-        <div className="hidden sm:block opacity-50 group-hover:opacity-100 transition-opacity">
-          <Sparkline data={link.clicksHistory} width={80} height={24} />
-        </div>
+        {/* Sparkline - removed, using API data */}
 
         {/* Stats */}
         <div className="text-right min-w-[80px]">
-          <p className="text-sm font-semibold text-foreground tabular-nums">{link.clicks.toLocaleString("pt-BR")}</p>
+          <p className="text-sm font-semibold text-foreground tabular-nums">{link.totalClicks.toLocaleString("pt-BR")}</p>
           <p className="text-[10px] text-muted-foreground">cliques</p>
         </div>
 
@@ -113,7 +112,7 @@ export function LinkCard({ link, viewMode }: LinkCardProps) {
             </DropdownMenuItem>
             <DropdownMenuSeparator className="bg-white/[0.06]" />
             <DropdownMenuItem className="gap-2 text-muted-foreground hover:text-foreground focus:text-foreground cursor-pointer">
-              {link.status === "paused" ? (
+              {link.state === "paused" ? (
                 <>
                   <Play className="w-4 h-4" />
                   Ativar
@@ -179,7 +178,7 @@ export function LinkCard({ link, viewMode }: LinkCardProps) {
               </DropdownMenuItem>
               <DropdownMenuSeparator className="bg-white/[0.06]" />
               <DropdownMenuItem className="gap-2 text-muted-foreground hover:text-foreground focus:text-foreground cursor-pointer">
-                {link.status === "paused" ? (
+                {link.state === "paused" ? (
                   <>
                     <Play className="w-4 h-4" />
                     Ativar
@@ -203,15 +202,10 @@ export function LinkCard({ link, viewMode }: LinkCardProps) {
       {/* URL */}
       <p className="text-xs text-muted-foreground truncate mb-5">{link.originalUrl}</p>
 
-      {/* Sparkline */}
-      <div className="mb-5 opacity-60 group-hover:opacity-100 transition-opacity">
-        <Sparkline data={link.clicksHistory} width={200} height={40} />
-      </div>
-
       {/* Stats */}
       <div className="flex items-end justify-between pt-4 border-t border-white/[0.06]">
         <div>
-          <p className="text-2xl font-semibold text-foreground tabular-nums">{link.clicks.toLocaleString("pt-BR")}</p>
+          <p className="text-2xl font-semibold text-foreground tabular-nums">{link.totalClicks.toLocaleString("pt-BR")}</p>
           <p className="text-[10px] text-muted-foreground uppercase tracking-wider mt-0.5">cliques totais</p>
         </div>
         <div className="text-right">

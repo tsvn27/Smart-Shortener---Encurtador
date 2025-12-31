@@ -1,8 +1,9 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
+import { useParams, useRouter } from "next/navigation"
 import Link from "next/link"
-import { mockLinks, mockClicks, analyticsData } from "@/lib/mock-data"
+import { api, type Link as LinkType, type ClickEvent, type LinkAnalytics } from "@/lib/api"
 import { StatusBadge } from "@/components/ui/status-badge"
 import { MetricCard } from "@/components/ui/metric-card"
 import { CountryFlag } from "@/components/ui/country-flag"
@@ -26,6 +27,7 @@ import {
   Shield,
   Sparkles,
   ArrowRight,
+  Loader2,
 } from "lucide-react"
 import {
   Area,
@@ -41,26 +43,132 @@ import {
 } from "recharts"
 
 export function LinkDetailContent() {
+  const params = useParams()
+  const router = useRouter()
   const [copied, setCopied] = useState(false)
+  const [link, setLink] = useState<LinkType | null>(null)
+  const [analytics, setAnalytics] = useState<LinkAnalytics | null>(null)
+  const [clicks, setClicks] = useState<ClickEvent[]>([])
+  const [loading, setLoading] = useState(true)
+  const [actionLoading, setActionLoading] = useState(false)
 
-  const link = mockLinks[0]
+  useEffect(() => {
+    async function fetchData() {
+      if (!params.id) return
+      
+      try {
+        const [linkRes, analyticsRes, clicksRes] = await Promise.all([
+          api.getLink(params.id as string),
+          api.getLinkAnalytics(params.id as string),
+          api.getLinkClicks(params.id as string, 10, 0),
+        ])
+        setLink(linkRes.data)
+        setAnalytics(analyticsRes.data)
+        setClicks(clicksRes.data)
+      } catch (err) {
+        console.error("Failed to fetch link:", err)
+      } finally {
+        setLoading(false)
+      }
+    }
+    fetchData()
+  }, [params.id])
 
   const copyToClipboard = async () => {
+    if (!link) return
     await navigator.clipboard.writeText(`https://sho.rt/${link.shortCode}`)
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
   }
 
-  const getDisplayStatus = () => {
-    if (link.clicksToday > 100) return "viral"
-    if (link.health < 60) return "sick"
-    return link.status
+  const handlePauseActivate = async () => {
+    if (!link) return
+    setActionLoading(true)
+    try {
+      if (link.state === "paused") {
+        const res = await api.activateLink(link.id)
+        setLink(res.data)
+      } else {
+        const res = await api.pauseLink(link.id)
+        setLink(res.data)
+      }
+    } catch (err) {
+      console.error("Failed to update link:", err)
+    } finally {
+      setActionLoading(false)
+    }
   }
 
-  const hourlyData = Array.from({ length: 24 }, (_, hour) => ({
-    hour,
-    clicks: Math.floor(Math.random() * 100) + 10,
+  const handleDelete = async () => {
+    if (!link || !confirm("Tem certeza que deseja excluir este link?")) return
+    setActionLoading(true)
+    try {
+      await api.deleteLink(link.id)
+      router.push("/links")
+    } catch (err) {
+      console.error("Failed to delete link:", err)
+    } finally {
+      setActionLoading(false)
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      </div>
+    )
+  }
+
+  if (!link) {
+    return (
+      <div className="text-center py-12">
+        <p className="text-muted-foreground">Link não encontrado</p>
+        <Link href="/links" className="text-primary hover:underline mt-2 inline-block">
+          Voltar para links
+        </Link>
+      </div>
+    )
+  }
+
+  const getDisplayStatus = (): "active" | "paused" | "expired" | "viral" | "sick" => {
+    if (link.clicksToday > 100) return "viral"
+    if (link.healthScore < 60) return "sick"
+    if (link.state === "active") return "active"
+    if (link.state === "paused") return "paused"
+    if (link.state === "expired") return "expired"
+    return "active"
+  }
+
+  // Device distribution from analytics
+  const deviceDistribution = analytics ? [
+    { name: "Mobile", value: analytics.byDevice["mobile"] || 0, fill: "#6366F1" },
+    { name: "Desktop", value: analytics.byDevice["desktop"] || 0, fill: "#8B5CF6" },
+    { name: "Tablet", value: analytics.byDevice["tablet"] || 0, fill: "#A855F7" },
+  ].filter(d => d.value > 0) : []
+
+  // Calculate percentages
+  const totalDevices = deviceDistribution.reduce((sum, d) => sum + d.value, 0)
+  const devicePercentages = deviceDistribution.map(d => ({
+    ...d,
+    value: totalDevices > 0 ? Math.round((d.value / totalDevices) * 100) : 0
   }))
+
+  // Top countries from analytics
+  const topCountries = analytics ? Object.entries(analytics.byCountry)
+    .map(([code, clicks]) => ({ code, clicks }))
+    .sort((a, b) => b.clicks - a.clicks)
+    .slice(0, 5) : []
+
+  const totalCountryClicks = topCountries.reduce((sum, c) => sum + c.clicks, 0)
+
+  // Hourly data from analytics
+  const hourlyData = analytics ? Array.from({ length: 24 }, (_, hour) => ({
+    hour,
+    clicks: analytics.byHour[hour] || 0,
+  })) : []
+
+  const maxHourlyClicks = Math.max(...hourlyData.map(h => h.clicks), 1)
 
   return (
     <div className="space-y-8">
@@ -89,10 +197,10 @@ export function LinkDetailContent() {
                 <span
                   className={cn(
                     "font-medium",
-                    link.health >= 80 ? "text-emerald-400" : link.health >= 60 ? "text-amber-400" : "text-rose-400",
+                    link.healthScore >= 80 ? "text-emerald-400" : link.healthScore >= 60 ? "text-amber-400" : "text-rose-400",
                   )}
                 >
-                  {link.health}%
+                  {link.healthScore}%
                 </span>
               </div>
             </div>
@@ -109,8 +217,13 @@ export function LinkDetailContent() {
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
-          <Button variant="outline" className="gap-2 border-white/[0.08] hover:bg-white/[0.04] bg-transparent h-10">
-            {link.status === "paused" ? (
+          <Button 
+            variant="outline" 
+            className="gap-2 border-white/[0.08] hover:bg-white/[0.04] bg-transparent h-10"
+            onClick={handlePauseActivate}
+            disabled={actionLoading}
+          >
+            {link.state === "paused" ? (
               <>
                 <Play className="w-4 h-4" />
                 Ativar
@@ -129,6 +242,8 @@ export function LinkDetailContent() {
           <Button
             variant="outline"
             className="gap-2 border-white/[0.08] hover:bg-rose-500/10 text-rose-400 hover:text-rose-300 bg-transparent h-10"
+            onClick={handleDelete}
+            disabled={actionLoading}
           >
             <Trash2 className="w-4 h-4" />
             Excluir
@@ -140,9 +255,8 @@ export function LinkDetailContent() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <MetricCard
           title="Cliques Totais"
-          value={link.clicks}
+          value={link.totalClicks}
           icon={<MousePointer className="w-4 h-4" />}
-          sparklineData={link.clicksHistory}
           delay={0}
         />
         <MetricCard title="Únicos" value={link.uniqueClicks} icon={<Users className="w-4 h-4" />} delay={50} />
@@ -150,12 +264,11 @@ export function LinkDetailContent() {
           title="Hoje"
           value={link.clicksToday}
           icon={<MousePointerClick className="w-4 h-4" />}
-          change={link.clicksToday > 100 ? 150 : 12}
           delay={100}
         />
         <MetricCard
           title="Trust Score"
-          value={link.health}
+          value={link.trustScore}
           format="percentage"
           icon={<Shield className="w-4 h-4" />}
           delay={150}
@@ -164,102 +277,71 @@ export function LinkDetailContent() {
 
       {/* Charts Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Clicks over time */}
-        <div className="lg:col-span-2 glass-card rounded-xl p-6 animate-fade-in" style={{ animationDelay: "200ms" }}>
-          <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-6">
-            Cliques ao longo do tempo
-          </h3>
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={analyticsData.clicksByDay} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
-                <defs>
-                  <linearGradient id="detailGradient" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0%" stopColor="#6366F1" stopOpacity={0.2} />
-                    <stop offset="100%" stopColor="#6366F1" stopOpacity={0} />
-                  </linearGradient>
-                </defs>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgba(250, 250, 250, 0.04)" vertical={false} />
-                <XAxis
-                  dataKey="date"
-                  axisLine={false}
-                  tickLine={false}
-                  tick={{ fill: "rgba(250, 250, 250, 0.4)", fontSize: 11 }}
-                />
-                <YAxis axisLine={false} tickLine={false} tick={{ fill: "rgba(250, 250, 250, 0.4)", fontSize: 11 }} />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: "rgba(10, 10, 11, 0.95)",
-                    border: "1px solid rgba(250, 250, 250, 0.08)",
-                    borderRadius: "12px",
-                    padding: "12px 16px",
-                  }}
-                  labelStyle={{ color: "#fafafa", fontWeight: 600 }}
-                  itemStyle={{ color: "#6366F1" }}
-                />
-                <Area type="monotone" dataKey="clicks" stroke="#6366F1" strokeWidth={2} fill="url(#detailGradient)" />
-              </AreaChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
         {/* Device distribution */}
         <div className="glass-card rounded-xl p-6 animate-fade-in" style={{ animationDelay: "250ms" }}>
           <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-6">Dispositivos</h3>
-          <div className="h-48">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={analyticsData.deviceDistribution}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={50}
-                  outerRadius={70}
-                  paddingAngle={3}
-                  dataKey="value"
-                >
-                  {analyticsData.deviceDistribution.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.fill} strokeWidth={0} />
-                  ))}
-                </Pie>
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-          <div className="flex justify-center gap-6 mt-4">
-            {analyticsData.deviceDistribution.map((item) => (
-              <div key={item.name} className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: item.fill }} />
-                <span className="text-xs text-muted-foreground">
-                  {item.name} <span className="text-foreground font-medium">{item.value}%</span>
-                </span>
+          {devicePercentages.length > 0 ? (
+            <>
+              <div className="h-48">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={devicePercentages}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={50}
+                      outerRadius={70}
+                      paddingAngle={3}
+                      dataKey="value"
+                    >
+                      {devicePercentages.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.fill} strokeWidth={0} />
+                      ))}
+                    </Pie>
+                  </PieChart>
+                </ResponsiveContainer>
               </div>
-            ))}
-          </div>
+              <div className="flex justify-center gap-6 mt-4">
+                {devicePercentages.map((item) => (
+                  <div key={item.name} className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: item.fill }} />
+                    <span className="text-xs text-muted-foreground">
+                      {item.name} <span className="text-foreground font-medium">{item.value}%</span>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </>
+          ) : (
+            <p className="text-sm text-muted-foreground text-center py-8">Sem dados ainda</p>
+          )}
         </div>
-      </div>
 
-      {/* Second row: Countries + Heatmap */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Top countries */}
         <div className="glass-card rounded-xl p-6 animate-fade-in" style={{ animationDelay: "300ms" }}>
           <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-6">Top 5 Países</h3>
-          <div className="space-y-4">
-            {analyticsData.topCountries.map((country, index) => (
-              <div key={country.code} className="flex items-center gap-4">
-                <span className="text-xs text-muted-foreground w-4 font-medium">{index + 1}</span>
-                <CountryFlag code={country.code} className="text-xl" />
-                <span className="text-sm text-foreground flex-1 font-medium">{country.country}</span>
-                <div className="w-28 h-2 bg-white/[0.04] rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-gradient-to-r from-primary to-primary/60 rounded-full transition-all duration-500"
-                    style={{ width: `${country.percentage}%` }}
-                  />
+          {topCountries.length > 0 ? (
+            <div className="space-y-4">
+              {topCountries.map((country, index) => (
+                <div key={country.code} className="flex items-center gap-4">
+                  <span className="text-xs text-muted-foreground w-4 font-medium">{index + 1}</span>
+                  <CountryFlag code={country.code} className="text-xl" />
+                  <span className="text-sm text-foreground flex-1 font-medium">{country.code}</span>
+                  <div className="w-20 h-2 bg-white/[0.04] rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-gradient-to-r from-primary to-primary/60 rounded-full transition-all duration-500"
+                      style={{ width: `${totalCountryClicks > 0 ? (country.clicks / totalCountryClicks) * 100 : 0}%` }}
+                    />
+                  </div>
+                  <span className="text-sm text-muted-foreground w-14 text-right tabular-nums">
+                    {country.clicks.toLocaleString("pt-BR")}
+                  </span>
                 </div>
-                <span className="text-sm text-muted-foreground w-14 text-right tabular-nums">
-                  {country.clicks.toLocaleString("pt-BR")}
-                </span>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground text-center py-8">Sem dados ainda</p>
+          )}
         </div>
 
         {/* Hour heatmap */}
@@ -267,7 +349,7 @@ export function LinkDetailContent() {
           <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-6">Cliques por Hora</h3>
           <div className="grid grid-cols-12 gap-1.5">
             {hourlyData.map((item) => {
-              const intensity = item.clicks / 100
+              const intensity = item.clicks / maxHourlyClicks
               return (
                 <div
                   key={item.hour}
@@ -294,70 +376,74 @@ export function LinkDetailContent() {
       {/* Recent clicks table */}
       <div className="glass-card rounded-xl p-6 animate-fade-in" style={{ animationDelay: "400ms" }}>
         <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-6">Cliques Recentes</h3>
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-white/[0.06]">
-                <th className="text-left text-[10px] font-medium text-muted-foreground pb-4 uppercase tracking-wider">
-                  Quando
-                </th>
-                <th className="text-left text-[10px] font-medium text-muted-foreground pb-4 uppercase tracking-wider">
-                  País
-                </th>
-                <th className="text-left text-[10px] font-medium text-muted-foreground pb-4 uppercase tracking-wider">
-                  Dispositivo
-                </th>
-                <th className="text-left text-[10px] font-medium text-muted-foreground pb-4 uppercase tracking-wider">
-                  Referrer
-                </th>
-                <th className="text-left text-[10px] font-medium text-muted-foreground pb-4 uppercase tracking-wider">
-                  Status
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {mockClicks.map((click) => (
-                <tr key={click.id} className="border-b border-white/[0.04] hover:bg-white/[0.02] transition-colors">
-                  <td className="py-4 text-sm text-muted-foreground">
-                    {formatDistanceToNow(new Date(click.timestamp), {
-                      addSuffix: true,
-                      locale: ptBR,
-                    })}
-                  </td>
-                  <td className="py-4">
-                    <div className="flex items-center gap-2.5">
-                      <CountryFlag code={click.countryCode} className="text-lg" />
-                      <span className="text-sm text-foreground">{click.country}</span>
-                    </div>
-                  </td>
-                  <td className="py-4">
-                    <div className="flex items-center gap-2.5">
-                      <DeviceIcon device={click.device} className="w-4 h-4 text-muted-foreground" />
-                      <span className="text-sm text-foreground capitalize">{click.device}</span>
-                    </div>
-                  </td>
-                  <td className="py-4 text-sm text-muted-foreground">{click.referrer || "Direto"}</td>
-                  <td className="py-4">
-                    <span
-                      className={cn(
-                        "px-2.5 py-1 rounded-lg text-[11px] font-medium uppercase tracking-wide",
-                        click.status === "legitimate" && "text-emerald-400 bg-emerald-500/10",
-                        click.status === "bot" && "text-rose-400 bg-rose-500/10",
-                        click.status === "suspicious" && "text-amber-400 bg-amber-500/10",
-                      )}
-                    >
-                      {click.status === "legitimate" ? "Legítimo" : click.status === "bot" ? "Bot" : "Suspeito"}
-                    </span>
-                  </td>
+        {clicks.length > 0 ? (
+          <div className="overflow-x-auto">
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-white/[0.06]">
+                  <th className="text-left text-[10px] font-medium text-muted-foreground pb-4 uppercase tracking-wider">
+                    Quando
+                  </th>
+                  <th className="text-left text-[10px] font-medium text-muted-foreground pb-4 uppercase tracking-wider">
+                    País
+                  </th>
+                  <th className="text-left text-[10px] font-medium text-muted-foreground pb-4 uppercase tracking-wider">
+                    Dispositivo
+                  </th>
+                  <th className="text-left text-[10px] font-medium text-muted-foreground pb-4 uppercase tracking-wider">
+                    Referrer
+                  </th>
+                  <th className="text-left text-[10px] font-medium text-muted-foreground pb-4 uppercase tracking-wider">
+                    Status
+                  </th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody>
+                {clicks.map((click) => (
+                  <tr key={click.id} className="border-b border-white/[0.04] hover:bg-white/[0.02] transition-colors">
+                    <td className="py-4 text-sm text-muted-foreground">
+                      {formatDistanceToNow(new Date(click.timestamp), {
+                        addSuffix: true,
+                        locale: ptBR,
+                      })}
+                    </td>
+                    <td className="py-4">
+                      <div className="flex items-center gap-2.5">
+                        <CountryFlag code={click.country || "BR"} className="text-lg" />
+                        <span className="text-sm text-foreground">{click.country || "Desconhecido"}</span>
+                      </div>
+                    </td>
+                    <td className="py-4">
+                      <div className="flex items-center gap-2.5">
+                        <DeviceIcon device={click.device} className="w-4 h-4 text-muted-foreground" />
+                        <span className="text-sm text-foreground capitalize">{click.device}</span>
+                      </div>
+                    </td>
+                    <td className="py-4 text-sm text-muted-foreground">{click.referrer || "Direto"}</td>
+                    <td className="py-4">
+                      <span
+                        className={cn(
+                          "px-2.5 py-1 rounded-lg text-[11px] font-medium uppercase tracking-wide",
+                          !click.isBot && !click.isSuspicious && "text-emerald-400 bg-emerald-500/10",
+                          click.isBot && "text-rose-400 bg-rose-500/10",
+                          click.isSuspicious && !click.isBot && "text-amber-400 bg-amber-500/10",
+                        )}
+                      >
+                        {click.isBot ? "Bot" : click.isSuspicious ? "Suspeito" : "Legítimo"}
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="text-sm text-muted-foreground text-center py-8">Nenhum clique registrado ainda</p>
+        )}
       </div>
 
       {/* Smart Rules Section */}
-      {link.rules.length > 0 && (
+      {link.rules && link.rules.length > 0 && (
         <div className="glass-card rounded-xl p-6 animate-fade-in" style={{ animationDelay: "450ms" }}>
           <div className="flex items-center gap-2.5 mb-6">
             <div className="p-2 rounded-lg bg-primary/15">
@@ -372,16 +458,18 @@ export function LinkDetailContent() {
                 className="flex items-center gap-4 p-4 rounded-xl bg-white/[0.02] border border-white/[0.06] hover:border-white/[0.1] transition-colors"
               >
                 <div className="flex-1">
-                  <span className="text-sm text-foreground">
-                    Se <span className="font-mono text-primary font-medium">{rule.field}</span>{" "}
-                    <span className="text-muted-foreground">
-                      {rule.operator === "=" ? "for igual a" : rule.operator === "!=" ? "for diferente de" : "contém"}
-                    </span>{" "}
-                    <span className="font-mono text-primary font-medium">{rule.value}</span>
-                  </span>
+                  {rule.conditions.map((cond, i) => (
+                    <span key={i} className="text-sm text-foreground">
+                      Se <span className="font-mono text-primary font-medium">{cond.field}</span>{" "}
+                      <span className="text-muted-foreground">
+                        {cond.operator === "eq" ? "for igual a" : cond.operator === "neq" ? "for diferente de" : "contém"}
+                      </span>{" "}
+                      <span className="font-mono text-primary font-medium">{String(cond.value)}</span>
+                    </span>
+                  ))}
                 </div>
                 <ArrowRight className="w-4 h-4 text-muted-foreground" />
-                <span className="text-sm text-muted-foreground truncate max-w-[200px]">{rule.redirectUrl}</span>
+                <span className="text-sm text-muted-foreground truncate max-w-[200px]">{rule.targetUrl}</span>
               </div>
             ))}
           </div>

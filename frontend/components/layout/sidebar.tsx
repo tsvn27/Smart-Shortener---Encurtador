@@ -1,14 +1,14 @@
 "use client"
 
 import Link from "next/link"
-import { usePathname } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { Logo } from "@/components/ui/logo"
 import { LayoutDashboard, Link2, BarChart3, Settings, PlusCircle, LogOut, Menu, X } from "lucide-react"
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
-import { mockUser } from "@/lib/mock-data"
+import { useAuth } from "@/lib/auth"
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -19,7 +19,18 @@ const navItems = [
 
 export function Sidebar() {
   const pathname = usePathname()
+  const router = useRouter()
+  const { user, logout } = useAuth()
   const [mobileOpen, setMobileOpen] = useState(false)
+
+  const handleLogout = () => {
+    logout()
+    router.push("/login")
+  }
+
+  const userName = user?.name || "Usuário"
+  const userEmail = user?.email || ""
+  const userInitials = userName.split(" ").map((n) => n[0]).join("").toUpperCase()
 
   return (
     <>
@@ -107,27 +118,22 @@ export function Sidebar() {
         <div className="p-4 border-t border-white/[0.06]">
           <div className="flex items-center gap-3 p-2 rounded-xl hover:bg-white/[0.04] transition-colors cursor-pointer">
             <Avatar className="w-9 h-9 ring-2 ring-white/[0.08]">
-              <AvatarImage src={mockUser.avatar || "/placeholder.svg"} />
               <AvatarFallback className="bg-primary/20 text-primary text-sm font-medium">
-                {mockUser.name
-                  .split(" ")
-                  .map((n) => n[0])
-                  .join("")}
+                {userInitials}
               </AvatarFallback>
             </Avatar>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium text-foreground truncate">{mockUser.name}</p>
-              <p className="text-xs text-muted-foreground truncate">{mockUser.email}</p>
+              <p className="text-sm font-medium text-foreground truncate">{userName}</p>
+              <p className="text-xs text-muted-foreground truncate">{userEmail}</p>
             </div>
-            <Link href="/login">
-              <Button
-                variant="ghost"
-                size="icon"
-                className="text-muted-foreground hover:text-foreground hover:bg-white/[0.06] h-8 w-8"
-              >
-                <LogOut className="w-4 h-4" />
-              </Button>
-            </Link>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={handleLogout}
+              className="text-muted-foreground hover:text-foreground hover:bg-white/[0.06] h-8 w-8"
+            >
+              <LogOut className="w-4 h-4" />
+            </Button>
           </div>
         </div>
       </aside>
