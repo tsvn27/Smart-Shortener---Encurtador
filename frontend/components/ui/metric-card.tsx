@@ -77,8 +77,6 @@ export function MetricCard({
       )}
       style={{ transitionDelay: `${delay}ms` }}
     >
-      <div className="absolute inset-0 rounded-xl opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none glow-subtle" />
-
       <div className="relative">
         <div className="flex items-start justify-between mb-4">
           <span className="text-xs font-medium text-muted-foreground uppercase tracking-wider">{title}</span>

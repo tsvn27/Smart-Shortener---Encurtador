@@ -276,7 +276,6 @@ export function LoginForm() {
           mounted ? "opacity-100" : "opacity-0",
         )}
       >
-        <Sparkles className="w-3 h-3" />
         <span>Powered by Smart Shortener</span>
       </div>
     </div>

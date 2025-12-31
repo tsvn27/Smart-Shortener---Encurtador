@@ -142,7 +142,7 @@ export function LinkCard({ link, viewMode }: LinkCardProps) {
       className={cn(
         "glass-card rounded-xl p-5 flex flex-col transition-all duration-200 relative group",
         "hover:border-white/[0.1] hover:-translate-y-1",
-        isViral && "border-primary/20 bg-primary/[0.02] pulse-glow",
+        isViral && "border-primary/20",
       )}
     >
       {/* Header */}
@@ -194,7 +194,7 @@ export function LinkCard({ link, viewMode }: LinkCardProps) {
       )}
 
       {/* Actions dropdown - top right */}
-      <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
+      <div className="absolute top-4 right-4 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
         <DropdownMenu>
           <DropdownMenuTrigger asChild onClick={(e) => e.preventDefault()}>
             <button className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-white/[0.06] transition-colors">
