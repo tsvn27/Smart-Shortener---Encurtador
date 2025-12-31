@@ -122,10 +122,6 @@ function rowToUser(row: UserRow): User {
     email: row.email,
     passwordHash: row.password_hash,
     name: row.name,
-    plan: row.plan as User['plan'],
-    maxLinks: row.max_links,
-    maxApiKeys: row.max_api_keys,
-    maxWebhooks: row.max_webhooks,
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
   };

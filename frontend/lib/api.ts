@@ -127,8 +127,63 @@ class ApiClient {
     return this.request<ApiResponse<User>>("/auth/me")
   }
 
+  async changePassword(currentPassword: string, newPassword: string) {
+    return this.request<ApiResponse<{ message: string }>>("/auth/change-password", {
+      method: "POST",
+      body: JSON.stringify({ currentPassword, newPassword }),
+    })
+  }
+
+  async updateProfile(name: string) {
+    return this.request<ApiResponse<User>>("/auth/profile", {
+      method: "PATCH",
+      body: JSON.stringify({ name }),
+    })
+  }
+
+  async deleteAccount() {
+    return this.request<void>("/auth/account", { method: "DELETE" })
+  }
+
   async getDashboardStats() {
     return this.request<ApiResponse<DashboardStats>>("/stats/dashboard")
+  }
+
+  async getApiKeys() {
+    return this.request<ApiResponse<ApiKeyItem[]>>("/api-keys")
+  }
+
+  async createApiKey(name: string, permissions: string[]) {
+    return this.request<ApiResponse<ApiKeyItem & { key: string }>>("/api-keys", {
+      method: "POST",
+      body: JSON.stringify({ name, permissions }),
+    })
+  }
+
+  async deleteApiKey(id: string) {
+    return this.request<void>(`/api-keys/${id}`, { method: "DELETE" })
+  }
+
+  async getWebhooks() {
+    return this.request<ApiResponse<WebhookItem[]>>("/webhooks")
+  }
+
+  async createWebhook(url: string, events: string[]) {
+    return this.request<ApiResponse<WebhookItem & { secret: string }>>("/webhooks", {
+      method: "POST",
+      body: JSON.stringify({ url, events }),
+    })
+  }
+
+  async updateWebhook(id: string, active: boolean) {
+    return this.request<ApiResponse<WebhookItem>>(`/webhooks/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ active }),
+    })
+  }
+
+  async deleteWebhook(id: string) {
+    return this.request<void>(`/webhooks/${id}`, { method: "DELETE" })
   }
 }
 
@@ -206,10 +261,6 @@ export interface User {
   id: string
   email: string
   name: string
-  plan: "free" | "pro" | "enterprise"
-  maxLinks: number
-  maxApiKeys: number
-  maxWebhooks: number
   createdAt: string
   updatedAt: string
 }
@@ -240,4 +291,21 @@ export interface DashboardStats {
   clicksToday: number
   botsBlocked: number
   clicksByDay: { date: string; clicks: number }[]
+}
+
+export interface ApiKeyItem {
+  id: string
+  name: string
+  lastChars: string
+  permissions: string[]
+  lastUsed: string | null
+  createdAt: string
+}
+
+export interface WebhookItem {
+  id: string
+  url: string
+  events: string[]
+  active: boolean
+  createdAt: string
 }

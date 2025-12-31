@@ -107,7 +107,6 @@ export function CreateLinkForm() {
     setError(null)
     
     try {
-      // Convert smart rules to API format
       const apiRules: RedirectRule[] = rules
         .filter(r => r.value && r.redirectUrl)
         .map((rule, index) => {
@@ -129,7 +128,6 @@ export function CreateLinkForm() {
           }
         })
       
-      // Build limits object
       const limits: Record<string, unknown> = {}
       if (maxClicks) limits.maxClicks = parseInt(maxClicks)
       if (maxClicksPerDay) limits.maxClicksPerDay = parseInt(maxClicksPerDay)

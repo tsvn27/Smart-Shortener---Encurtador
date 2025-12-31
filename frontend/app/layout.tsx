@@ -3,6 +3,7 @@ import type { Metadata, Viewport } from "next"
 import { Inter, Geist_Mono } from "next/font/google"
 import { Analytics } from "@vercel/analytics/next"
 import { AuthProvider } from "@/lib/auth"
+import { ToastProvider } from "@/components/ui/toast"
 import "./globals.css"
 
 const inter = Inter({
@@ -43,7 +44,9 @@ export default function RootLayout({
     <html lang="pt-BR">
       <body className={`${inter.variable} ${geistMono.variable} font-sans antialiased`}>
         <AuthProvider>
-          {children}
+          <ToastProvider>
+            {children}
+          </ToastProvider>
         </AuthProvider>
         <Analytics />
       </body>

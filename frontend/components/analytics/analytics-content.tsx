@@ -55,14 +55,12 @@ export function AnalyticsContent() {
     )
   }
 
-  // Calculate device distribution from links
   const deviceDistribution = [
     { name: "Mobile", value: 62, fill: "#6366F1" },
     { name: "Desktop", value: 31, fill: "#8B5CF6" },
     { name: "Tablet", value: 7, fill: "#A855F7" },
   ]
 
-  // Top countries (placeholder - would need click data aggregation)
   const topCountries = [
     { code: "BR", country: "Brasil", percentage: 68 },
     { code: "US", country: "Estados Unidos", percentage: 12 },
@@ -71,7 +69,6 @@ export function AnalyticsContent() {
     { code: "AR", country: "Argentina", percentage: 4 },
   ]
 
-  // Sort links by clicks
   const topLinks = [...links].sort((a, b) => b.totalClicks - a.totalClicks).slice(0, 5)
 
   const botBlockRate = stats ? Math.round((stats.botsBlocked / Math.max(stats.totalClicks, 1)) * 100) : 0

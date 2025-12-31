@@ -1,8 +1,8 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import Link from "next/link"
-import { Search, Filter, Grid3X3, List, PlusCircle, X, Link2, Loader2 } from "lucide-react"
+import { Search, Filter, Grid3X3, List, PlusCircle, X, Link2, Loader2, ChevronLeft, ChevronRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { api, Link as LinkType } from "@/lib/api"
@@ -12,12 +12,15 @@ import { cn } from "@/lib/utils"
 type ViewMode = "grid" | "list"
 type StatusFilter = "all" | "active" | "paused" | "expired"
 
+const ITEMS_PER_PAGE = 12
+
 export function LinksContent() {
   const [links, setLinks] = useState<LinkType[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [searchQuery, setSearchQuery] = useState("")
   const [viewMode, setViewMode] = useState<ViewMode>("grid")
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all")
+  const [currentPage, setCurrentPage] = useState(1)
 
   useEffect(() => {
     async function loadLinks() {
@@ -33,21 +36,56 @@ export function LinksContent() {
     loadLinks()
   }, [])
 
-  const filteredLinks = links.filter((link) => {
-    const matchesSearch =
-      link.shortCode.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      link.originalUrl.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      link.tags.some((tag) => tag.toLowerCase().includes(searchQuery.toLowerCase()))
+  const filteredLinks = useMemo(() => {
+    return links.filter((link) => {
+      const matchesSearch =
+        link.shortCode.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        link.originalUrl.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        link.tags.some((tag) => tag.toLowerCase().includes(searchQuery.toLowerCase()))
 
-    const matchesStatus = statusFilter === "all" || link.state === statusFilter
+      const matchesStatus = statusFilter === "all" || link.state === statusFilter
 
-    return matchesSearch && matchesStatus
-  })
+      return matchesSearch && matchesStatus
+    })
+  }, [links, searchQuery, statusFilter])
+
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [searchQuery, statusFilter])
+
+  const totalPages = Math.ceil(filteredLinks.length / ITEMS_PER_PAGE)
+  const paginatedLinks = filteredLinks.slice(
+    (currentPage - 1) * ITEMS_PER_PAGE,
+    currentPage * ITEMS_PER_PAGE
+  )
+
+  const handleLinkDeleted = (id: string) => {
+    setLinks(links.filter(l => l.id !== id))
+  }
+
+  const handleLinkUpdated = (updatedLink: LinkType) => {
+    setLinks(links.map(l => l.id === updatedLink.id ? updatedLink : l))
+  }
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      <div className="space-y-8">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <div className="h-9 w-32 skeleton rounded-lg" />
+            <div className="h-4 w-24 skeleton rounded mt-2" />
+          </div>
+          <div className="h-11 w-32 skeleton rounded-lg" />
+        </div>
+        <div className="flex gap-4">
+          <div className="h-11 flex-1 skeleton rounded-xl" />
+          <div className="h-11 w-64 skeleton rounded-xl" />
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {[...Array(6)].map((_, i) => (
+            <div key={i} className="h-48 skeleton rounded-xl" />
+          ))}
+        </div>
       </div>
     )
   }
@@ -181,17 +219,80 @@ export function LinksContent() {
           )}
         </div>
       ) : (
-        <div
-          className={cn(
-            viewMode === "grid" ? "grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4" : "flex flex-col gap-3",
-          )}
-        >
-          {filteredLinks.map((link, index) => (
-            <div key={link.id} className="animate-fade-in" style={{ animationDelay: `${100 + index * 30}ms` }}>
-              <LinkCard link={link} viewMode={viewMode} />
+        <>
+          <div
+            className={cn(
+              viewMode === "grid" ? "grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4" : "flex flex-col gap-3",
+            )}
+          >
+            {paginatedLinks.map((link, index) => (
+              <div key={link.id} className="animate-fade-in" style={{ animationDelay: `${100 + index * 30}ms` }}>
+                <LinkCard 
+                  link={link} 
+                  viewMode={viewMode} 
+                  onDeleted={() => handleLinkDeleted(link.id)}
+                  onUpdated={handleLinkUpdated}
+                />
+              </div>
+            ))}
+          </div>
+
+          {/* Pagination */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-center gap-2 pt-6 animate-fade-in">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+                className="border-white/[0.08] bg-transparent h-9 w-9 p-0"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </Button>
+              
+              <div className="flex items-center gap-1">
+                {[...Array(totalPages)].map((_, i) => {
+                  const page = i + 1
+                  const isActive = page === currentPage
+                  const isNearCurrent = Math.abs(page - currentPage) <= 1
+                  const isEdge = page === 1 || page === totalPages
+                  
+                  if (!isNearCurrent && !isEdge && totalPages > 5) {
+                    if (page === 2 || page === totalPages - 1) {
+                      return <span key={page} className="px-1 text-muted-foreground">...</span>
+                    }
+                    return null
+                  }
+                  
+                  return (
+                    <button
+                      key={page}
+                      onClick={() => setCurrentPage(page)}
+                      className={cn(
+                        "h-9 min-w-9 px-3 rounded-lg text-sm font-medium transition-all",
+                        isActive
+                          ? "bg-primary text-primary-foreground"
+                          : "text-muted-foreground hover:text-foreground hover:bg-white/[0.04]"
+                      )}
+                    >
+                      {page}
+                    </button>
+                  )
+                })}
+              </div>
+
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                disabled={currentPage === totalPages}
+                className="border-white/[0.08] bg-transparent h-9 w-9 p-0"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </Button>
             </div>
-          ))}
-        </div>
+          )}
+        </>
       )}
     </div>
   )

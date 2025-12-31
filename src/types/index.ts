@@ -148,10 +148,6 @@ export interface User {
   email: string;
   passwordHash: string;
   name: string;
-  plan: 'free' | 'pro' | 'enterprise';
-  maxLinks: number;
-  maxApiKeys: number;
-  maxWebhooks: number;
   createdAt: Date;
   updatedAt: Date;
 }

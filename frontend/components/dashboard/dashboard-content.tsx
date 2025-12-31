@@ -20,7 +20,6 @@ import {
   Medal,
   Award,
   Heart,
-  Crown
 } from "lucide-react"
 import { useAuth } from "@/lib/auth"
 import { api, Link as LinkType, DashboardStats } from "@/lib/api"
@@ -65,7 +64,6 @@ export function DashboardContent() {
   const hour = new Date().getHours()
   const greeting = hour < 12 ? "Bom dia" : hour < 18 ? "Boa tarde" : "Boa noite"
 
-  // Calculate performance metrics
   const totalClicks = stats?.totalClicks || 0
   const clicksToday = stats?.clicksToday || 0
   const avgClicksPerLink = links.length > 0 ? Math.round(totalClicks / links.length) : 0
@@ -204,12 +202,6 @@ export function DashboardContent() {
               label="Saúde geral"
               value={`${links.length > 0 ? Math.round((healthyLinks / links.length) * 100) : 0}%`}
               suffix="saudáveis"
-            />
-            <QuickStat
-              icon={<Crown className="w-4 h-4 text-amber-400" />}
-              label="Plano atual"
-              value={user?.plan === "free" ? "Gratuito" : user?.plan === "pro" ? "Pro" : "Enterprise"}
-              suffix={`${user?.maxLinks || 10} links`}
             />
           </div>
         </div>

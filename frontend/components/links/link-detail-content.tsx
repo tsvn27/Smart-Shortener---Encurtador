@@ -9,6 +9,10 @@ import { MetricCard } from "@/components/ui/metric-card"
 import { CountryFlag } from "@/components/ui/country-flag"
 import { DeviceIcon } from "@/components/ui/device-icon"
 import { Button } from "@/components/ui/button"
+import { ConfirmModal } from "@/components/ui/confirm-modal"
+import { QRCode } from "@/components/ui/qr-code"
+import { useToast } from "@/components/ui/toast"
+import { getShortUrl } from "@/lib/constants"
 import { cn } from "@/lib/utils"
 import { formatDistanceToNow } from "date-fns"
 import { ptBR } from "date-fns/locale"
@@ -30,27 +34,23 @@ import {
   Loader2,
 } from "lucide-react"
 import {
-  Area,
-  AreaChart,
   ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
   PieChart,
   Pie,
   Cell,
-  CartesianGrid,
 } from "recharts"
 
 export function LinkDetailContent() {
   const params = useParams()
   const router = useRouter()
+  const { success, error } = useToast()
   const [copied, setCopied] = useState(false)
   const [link, setLink] = useState<LinkType | null>(null)
   const [analytics, setAnalytics] = useState<LinkAnalytics | null>(null)
   const [clicks, setClicks] = useState<ClickEvent[]>([])
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState(false)
+  const [showDeleteModal, setShowDeleteModal] = useState(false)
 
   useEffect(() => {
     async function fetchData() {
@@ -74,10 +74,13 @@ export function LinkDetailContent() {
     fetchData()
   }, [params.id])
 
+  const shortUrl = link ? getShortUrl(link.shortCode) : ""
+
   const copyToClipboard = async () => {
     if (!link) return
-    await navigator.clipboard.writeText(`https://sho.rt/${link.shortCode}`)
+    await navigator.clipboard.writeText(shortUrl)
     setCopied(true)
+    success("Link copiado!")
     setTimeout(() => setCopied(false), 2000)
   }
 
@@ -88,27 +91,31 @@ export function LinkDetailContent() {
       if (link.state === "paused") {
         const res = await api.activateLink(link.id)
         setLink(res.data)
+        success("Link ativado!")
       } else {
         const res = await api.pauseLink(link.id)
         setLink(res.data)
+        success("Link pausado!")
       }
     } catch (err) {
-      console.error("Failed to update link:", err)
+      error("Erro ao atualizar link")
     } finally {
       setActionLoading(false)
     }
   }
 
   const handleDelete = async () => {
-    if (!link || !confirm("Tem certeza que deseja excluir este link?")) return
+    if (!link) return
     setActionLoading(true)
     try {
       await api.deleteLink(link.id)
+      success("Link excluído!")
       router.push("/links")
     } catch (err) {
-      console.error("Failed to delete link:", err)
+      error("Erro ao excluir link")
     } finally {
       setActionLoading(false)
+      setShowDeleteModal(false)
     }
   }
 
@@ -140,21 +147,18 @@ export function LinkDetailContent() {
     return "active"
   }
 
-  // Device distribution from analytics
   const deviceDistribution = analytics ? [
     { name: "Mobile", value: analytics.byDevice["mobile"] || 0, fill: "#6366F1" },
     { name: "Desktop", value: analytics.byDevice["desktop"] || 0, fill: "#8B5CF6" },
     { name: "Tablet", value: analytics.byDevice["tablet"] || 0, fill: "#A855F7" },
   ].filter(d => d.value > 0) : []
 
-  // Calculate percentages
   const totalDevices = deviceDistribution.reduce((sum, d) => sum + d.value, 0)
   const devicePercentages = deviceDistribution.map(d => ({
     ...d,
     value: totalDevices > 0 ? Math.round((d.value / totalDevices) * 100) : 0
   }))
 
-  // Top countries from analytics
   const topCountries = analytics ? Object.entries(analytics.byCountry)
     .map(([code, clicks]) => ({ code, clicks }))
     .sort((a, b) => b.clicks - a.clicks)
@@ -162,7 +166,6 @@ export function LinkDetailContent() {
 
   const totalCountryClicks = topCountries.reduce((sum, c) => sum + c.clicks, 0)
 
-  // Hourly data from analytics
   const hourlyData = analytics ? Array.from({ length: 24 }, (_, hour) => ({
     hour,
     clicks: analytics.byHour[hour] || 0,
@@ -235,14 +238,16 @@ export function LinkDetailContent() {
               </>
             )}
           </Button>
-          <Button variant="outline" className="gap-2 border-white/[0.08] hover:bg-white/[0.04] bg-transparent h-10">
-            <Pencil className="w-4 h-4" />
-            Editar
+          <Button variant="outline" className="gap-2 border-white/[0.08] hover:bg-white/[0.04] bg-transparent h-10" asChild>
+            <Link href={`/links/${link.id}/edit`}>
+              <Pencil className="w-4 h-4" />
+              Editar
+            </Link>
           </Button>
           <Button
             variant="outline"
             className="gap-2 border-white/[0.08] hover:bg-rose-500/10 text-rose-400 hover:text-rose-300 bg-transparent h-10"
-            onClick={handleDelete}
+            onClick={() => setShowDeleteModal(true)}
             disabled={actionLoading}
           >
             <Trash2 className="w-4 h-4" />
@@ -415,7 +420,7 @@ export function LinkDetailContent() {
                     </td>
                     <td className="py-4">
                       <div className="flex items-center gap-2.5">
-                        <DeviceIcon device={click.device} className="w-4 h-4 text-muted-foreground" />
+                        <DeviceIcon device={click.device as "mobile" | "desktop" | "tablet"} className="w-4 h-4 text-muted-foreground" />
                         <span className="text-sm text-foreground capitalize">{click.device}</span>
                       </div>
                     </td>
@@ -475,6 +480,80 @@ export function LinkDetailContent() {
           </div>
         </div>
       )}
+
+      {/* QR Code Section */}
+      <div className="glass-card rounded-xl overflow-hidden animate-fade-in" style={{ animationDelay: "500ms" }}>
+        <div className="flex flex-col lg:flex-row">
+          {/* QR Code side */}
+          <div className="lg:w-72 p-8 flex items-center justify-center bg-[#0a0a0b] relative">
+            {/* Background pattern */}
+            <div className="absolute inset-0 opacity-5">
+              <div className="absolute inset-0" style={{
+                backgroundImage: `radial-gradient(circle at 1px 1px, white 1px, transparent 0)`,
+                backgroundSize: '20px 20px'
+              }} />
+            </div>
+            <QRCode value={shortUrl} size={180} />
+          </div>
+          
+          {/* Info side */}
+          <div className="flex-1 p-6 lg:p-8">
+            <div className="flex items-center gap-2 mb-4">
+              <div className="p-2 rounded-lg bg-primary/10">
+                <svg viewBox="0 0 24 24" className="w-4 h-4 text-primary" fill="none" stroke="currentColor" strokeWidth="2">
+                  <rect x="3" y="3" width="7" height="7" rx="1" />
+                  <rect x="14" y="3" width="7" height="7" rx="1" />
+                  <rect x="3" y="14" width="7" height="7" rx="1" />
+                  <rect x="14" y="14" width="3" height="3" />
+                  <rect x="18" y="14" width="3" height="3" />
+                  <rect x="14" y="18" width="3" height="3" />
+                  <rect x="18" y="18" width="3" height="3" />
+                </svg>
+              </div>
+              <h3 className="text-sm font-medium text-foreground">QR Code</h3>
+            </div>
+            
+            <p className="text-sm text-muted-foreground mb-6">
+              Escaneie com a câmera do celular para acessar o link instantaneamente. Perfeito para materiais impressos, apresentações ou compartilhamento rápido.
+            </p>
+            
+            <div className="p-3 rounded-xl bg-white/[0.02] border border-white/[0.06] mb-6">
+              <p className="text-xs text-muted-foreground mb-1">Link encurtado</p>
+              <p className="font-mono text-sm text-foreground break-all">{shortUrl}</p>
+            </div>
+            
+            <div className="flex items-center gap-3">
+              <Button 
+                variant="outline" 
+                className="gap-2 border-white/[0.08] hover:bg-white/[0.04] bg-transparent flex-1 lg:flex-none"
+                onClick={copyToClipboard}
+              >
+                {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+                {copied ? "Copiado!" : "Copiar"}
+              </Button>
+              <Button 
+                variant="outline" 
+                className="gap-2 border-white/[0.08] hover:bg-white/[0.04] bg-transparent flex-1 lg:flex-none"
+                onClick={() => window.open(shortUrl, "_blank")}
+              >
+                <ExternalLink className="w-4 h-4" />
+                Abrir
+              </Button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Confirm Delete Modal */}
+      <ConfirmModal
+        open={showDeleteModal}
+        title="Excluir link"
+        description={`Tem certeza que deseja excluir /${link.shortCode}? Esta ação não pode ser desfeita.`}
+        confirmText={actionLoading ? "Excluindo..." : "Excluir"}
+        danger
+        onConfirm={handleDelete}
+        onCancel={() => setShowDeleteModal(false)}
+      />
     </div>
   )
 }
