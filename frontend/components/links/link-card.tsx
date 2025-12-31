@@ -156,7 +156,48 @@ export function LinkCard({ link, viewMode }: LinkCardProps) {
             {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
           </button>
         </div>
-        <StatusBadge status={getDisplayStatus()} />
+        <div className="flex items-center gap-2">
+          <StatusBadge status={getDisplayStatus()} />
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild onClick={(e) => e.preventDefault()}>
+              <button className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-white/[0.06] transition-colors opacity-0 group-hover:opacity-100">
+                <MoreHorizontal className="w-4 h-4" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48 bg-[#0a0a0b]/95 backdrop-blur-xl border-white/[0.08]">
+              <DropdownMenuItem className="gap-2 text-muted-foreground hover:text-foreground focus:text-foreground cursor-pointer">
+                <BarChart3 className="w-4 h-4" />
+                Ver Analytics
+              </DropdownMenuItem>
+              <DropdownMenuItem className="gap-2 text-muted-foreground hover:text-foreground focus:text-foreground cursor-pointer">
+                <Pencil className="w-4 h-4" />
+                Editar
+              </DropdownMenuItem>
+              <DropdownMenuItem className="gap-2 text-muted-foreground hover:text-foreground focus:text-foreground cursor-pointer">
+                <ExternalLink className="w-4 h-4" />
+                Abrir link
+              </DropdownMenuItem>
+              <DropdownMenuSeparator className="bg-white/[0.06]" />
+              <DropdownMenuItem className="gap-2 text-muted-foreground hover:text-foreground focus:text-foreground cursor-pointer">
+                {link.status === "paused" ? (
+                  <>
+                    <Play className="w-4 h-4" />
+                    Ativar
+                  </>
+                ) : (
+                  <>
+                    <Pause className="w-4 h-4" />
+                    Pausar
+                  </>
+                )}
+              </DropdownMenuItem>
+              <DropdownMenuItem className="gap-2 text-rose-400 hover:text-rose-300 focus:text-rose-300 cursor-pointer">
+                <Trash2 className="w-4 h-4" />
+                Excluir
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       </div>
 
       {/* URL */}
@@ -193,48 +234,6 @@ export function LinkCard({ link, viewMode }: LinkCardProps) {
         </div>
       )}
 
-      {/* Actions dropdown - top right */}
-      <div className="absolute top-4 right-4 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild onClick={(e) => e.preventDefault()}>
-            <button className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-white/[0.06] transition-colors">
-              <MoreHorizontal className="w-4 h-4" />
-            </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-48 bg-[#0a0a0b]/95 backdrop-blur-xl border-white/[0.08]">
-            <DropdownMenuItem className="gap-2 text-muted-foreground hover:text-foreground focus:text-foreground cursor-pointer">
-              <BarChart3 className="w-4 h-4" />
-              Ver Analytics
-            </DropdownMenuItem>
-            <DropdownMenuItem className="gap-2 text-muted-foreground hover:text-foreground focus:text-foreground cursor-pointer">
-              <Pencil className="w-4 h-4" />
-              Editar
-            </DropdownMenuItem>
-            <DropdownMenuItem className="gap-2 text-muted-foreground hover:text-foreground focus:text-foreground cursor-pointer">
-              <ExternalLink className="w-4 h-4" />
-              Abrir link
-            </DropdownMenuItem>
-            <DropdownMenuSeparator className="bg-white/[0.06]" />
-            <DropdownMenuItem className="gap-2 text-muted-foreground hover:text-foreground focus:text-foreground cursor-pointer">
-              {link.status === "paused" ? (
-                <>
-                  <Play className="w-4 h-4" />
-                  Ativar
-                </>
-              ) : (
-                <>
-                  <Pause className="w-4 h-4" />
-                  Pausar
-                </>
-              )}
-            </DropdownMenuItem>
-            <DropdownMenuItem className="gap-2 text-rose-400 hover:text-rose-300 focus:text-rose-300 cursor-pointer">
-              <Trash2 className="w-4 h-4" />
-              Excluir
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
     </Link>
   )
 }
