@@ -1,37 +1,23 @@
 import { createHmac } from 'crypto';
-import { queryAll, execute } from '../db/index.js';
-import type { Webhook, WebhookEvent } from '../types/index.js';
-
-interface WebhookRow {
-  id: string;
-  owner_id: string;
-  url: string;
-  secret: string;
-  events_json: string;
-  active: number;
-  max_retries: number;
-  retry_delay_ms: number;
-  total_deliveries: number;
-  failed_deliveries: number;
-  last_delivery_at: string | null;
-  created_at: string;
-}
+import { Webhook, IWebhook } from '../db/index.js';
+import { logger } from '../lib/logger.js';
+import type { WebhookEvent } from '../types/index.js';
 
 interface WebhookPayload {
   event: WebhookEvent;
-  timestamp: string;
   data: Record<string, unknown>;
+  timestamp: string;
 }
 
 export class WebhookService {
   
   async trigger(ownerId: string, event: WebhookEvent, data: Record<string, unknown>): Promise<void> {
-    const webhooks = this.getActiveWebhooks(ownerId, event);
+    const webhooks = await this.getActiveWebhooks(ownerId, event);
     
     const payload: WebhookPayload = {
       event,
-      timestamp: new Date().toISOString(),
       data,
+      timestamp: new Date().toISOString(),
     };
     
     for (const webhook of webhooks) {
@@ -39,7 +25,7 @@ export class WebhookService {
     }
   }
   
-  private async deliver(webhook: Webhook, payload: WebhookPayload, attempt = 1): Promise<void> {
+  private async deliver(webhook: IWebhook, payload: WebhookPayload, attempt = 1): Promise<void> {
     const body = JSON.stringify(payload);
     const signature = this.sign(body, webhook.secret);
     
@@ -50,7 +36,6 @@ export class WebhookService {
           'Content-Type': 'application/json',
           'X-Webhook-Signature': signature,
           'X-Webhook-Event': payload.event,
-          'X-Webhook-Timestamp': payload.timestamp,
         },
         body,
         signal: AbortSignal.timeout(10000),
@@ -58,52 +43,40 @@ export class WebhookService {
       
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       
-      this.recordSuccess(webhook.id);
-      
+      await this.recordSuccess(webhook._id);
     } catch (error) {
+      logger.warn(`Webhook delivery failed for ${webhook._id}`, { attempt, error });
+      
       if (attempt < webhook.maxRetries) {
-        const delay = webhook.retryDelayMs * Math.pow(2, attempt - 1);
-        await this.sleep(delay);
+        await this.sleep(webhook.retryDelayMs * attempt);
         return this.deliver(webhook, payload, attempt + 1);
       }
       
-      this.recordFailure(webhook.id);
-      throw error;
+      await this.recordFailure(webhook._id);
     }
   }
   
-  private sign(payload: string, secret: string): string {
-    return createHmac('sha256', secret).update(payload).digest('hex');
+  private sign(body: string, secret: string): string {
+    return createHmac('sha256', secret).update(body).digest('hex');
   }
   
-  private getActiveWebhooks(ownerId: string, event: WebhookEvent): Webhook[] {
-    const rows = queryAll<WebhookRow>('SELECT * FROM webhooks WHERE owner_id = ? AND active = 1', [ownerId]);
-    return rows.map(this.rowToWebhook).filter(w => w.events.includes(event));
+  private async getActiveWebhooks(ownerId: string, event: WebhookEvent): Promise<IWebhook[]> {
+    const webhooks = await Webhook.find({ ownerId, active: true });
+    return webhooks.filter(w => w.events.includes(event));
   }
   
-  private rowToWebhook(row: WebhookRow): Webhook {
-    return {
-      id: row.id,
-      ownerId: row.owner_id,
-      url: row.url,
-      secret: row.secret,
-      events: JSON.parse(row.events_json),
-      active: row.active === 1,
-      maxRetries: row.max_retries,
-      retryDelayMs: row.retry_delay_ms,
-      totalDeliveries: row.total_deliveries,
-      failedDeliveries: row.failed_deliveries,
-      lastDeliveryAt: row.last_delivery_at ? new Date(row.last_delivery_at) : undefined,
-      createdAt: new Date(row.created_at),
-    };
+  private async recordSuccess(webhookId: string): Promise<void> {
+    await Webhook.findByIdAndUpdate(webhookId, {
+      $inc: { totalDeliveries: 1 },
+      lastDeliveryAt: new Date(),
+    });
   }
   
-  private recordSuccess(webhookId: string): void {
-    execute(`UPDATE webhooks SET total_deliveries = total_deliveries + 1, last_delivery_at = CURRENT_TIMESTAMP WHERE id = ?`, [webhookId]);
-  }
-  
-  private recordFailure(webhookId: string): void {
-    execute(`UPDATE webhooks SET total_deliveries = total_deliveries + 1, failed_deliveries = failed_deliveries + 1, last_delivery_at = CURRENT_TIMESTAMP WHERE id = ?`, [webhookId]);
+  private async recordFailure(webhookId: string): Promise<void> {
+    await Webhook.findByIdAndUpdate(webhookId, {
+      $inc: { totalDeliveries: 1, failedDeliveries: 1 },
+      lastDeliveryAt: new Date(),
+    });
   }
   
   private sleep(ms: number): Promise<void> {

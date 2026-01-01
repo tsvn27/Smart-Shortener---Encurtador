@@ -4,11 +4,11 @@ import { nanoid } from 'nanoid';
 import { createHash, randomBytes } from 'crypto';
 import { authenticator } from 'otplib';
 import QRCode from 'qrcode';
+import { User, Link, ClickEvent, ApiKey, Webhook, PasswordReset } from '../../db/index.js';
 import { linkRepository } from '../../repositories/link-repository.js';
 import { clickRepository } from '../../repositories/click-repository.js';
 import { validateBody, validateQuery } from '../middleware/validation.js';
 import { requireAuth, requirePermission, generateToken, hashPassword, verifyPassword, validatePassword, validateEmail, setAuthCookie, clearAuthCookie } from '../middleware/auth.js';
-import { queryOne, queryAll, execute } from '../../db/index.js';
 import { validateUrl, sanitizeUrl } from '../../lib/url-validator.js';
 import { sendPasswordResetEmail } from '../../lib/email.js';
 import { logger } from '../../lib/logger.js';
@@ -16,50 +16,6 @@ import { sanitizeInput, getClientIP, recordSuspiciousActivity } from '../../lib/
 import { authLimiter, createLinkLimiter, passwordResetLimiter, apiKeyLimiter, searchLimiter } from '../../lib/rate-limiter.js';
 
 const router = Router();
-
-interface UserRow {
-  id: string;
-  email: string;
-  password_hash: string;
-  name: string;
-  avatar: string | null;
-  two_fa_secret: string | null;
-  two_fa_enabled: number;
-  plan: string;
-  max_links: number;
-  max_api_keys: number;
-  max_webhooks: number;
-  created_at: string;
-  updated_at: string;
-}
-
-interface ApiKeyRow {
-  id: string;
-  key_hash: string;
-  name: string;
-  owner_id: string;
-  permissions_json: string;
-  last_used_at: string | null;
-  created_at: string;
-}
-
-interface WebhookRow {
-  id: string;
-  owner_id: string;
-  url: string;
-  secret: string;
-  events_json: string;
-  active: number;
-  created_at: string;
-}
-
-interface PasswordResetRow {
-  id: string;
-  user_id: string;
-  token: string;
-  expires_at: string;
-  used: number;
-}
 
 const loginSchema = z.object({
   email: z.string().email().max(254),
@@ -88,8 +44,8 @@ router.post('/auth/register', authLimiter, validateBody(registerSchema), async (
   if (!passwordValidation.valid) {
     return res.status(400).json({ error: passwordValidation.message });
   }
-  
-  const existing = queryOne<UserRow>('SELECT id FROM users WHERE email = ?', [sanitizedEmail]);
+
+  const existing = await User.findOne({ email: sanitizedEmail });
   if (existing) {
     return res.status(409).json({ error: 'Email já cadastrado' });
   }
@@ -97,14 +53,14 @@ router.post('/auth/register', authLimiter, validateBody(registerSchema), async (
   const id = nanoid();
   const passwordHash = await hashPassword(password);
   
-  execute(
-    'INSERT INTO users (id, email, password_hash, name) VALUES (?, ?, ?, ?)',
-    [id, sanitizedEmail, passwordHash, sanitizedName]
-  );
+  const user = await User.create({
+    _id: id,
+    email: sanitizedEmail,
+    passwordHash,
+    name: sanitizedName,
+  });
   
   const token = generateToken(id);
-  const user = queryOne<UserRow>('SELECT * FROM users WHERE id = ?', [id])!;
-  
   setAuthCookie(res, token);
   logger.info(`New user registered: ${sanitizedEmail}`, { ip });
   
@@ -112,12 +68,13 @@ router.post('/auth/register', authLimiter, validateBody(registerSchema), async (
     data: {
       token,
       user: {
-        id: user.id,
+        id: user._id,
         email: user.email,
         name: user.name,
-        avatar: user.avatar || undefined,
-        createdAt: user.created_at,
-        updatedAt: user.updated_at,
+        avatar: user.avatar,
+        twoFAEnabled: user.twoFAEnabled,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt,
       },
     },
   });
@@ -129,30 +86,27 @@ router.post('/auth/login', authLimiter, validateBody(loginSchema), async (req, r
   
   const sanitizedEmail = sanitizeInput(email.toLowerCase().trim());
   
-  const user = queryOne<UserRow>('SELECT * FROM users WHERE email = ?', [sanitizedEmail]);
+  const user = await User.findOne({ email: sanitizedEmail });
   if (!user) {
     logger.warn(`Failed login attempt for non-existent email`, { ip });
     return res.status(401).json({ error: 'Email ou senha incorretos' });
   }
   
-  const valid = await verifyPassword(password, user.password_hash);
+  const valid = await verifyPassword(password, user.passwordHash);
   if (!valid) {
     logger.warn(`Failed login attempt for ${sanitizedEmail}`, { ip });
     recordSuspiciousActivity(ip);
     return res.status(401).json({ error: 'Email ou senha incorretos' });
   }
-  
-  if (user.two_fa_enabled === 1) {
+
+  if (user.twoFAEnabled) {
     if (!twoFACode) {
       return res.status(200).json({ 
-        data: { 
-          requires2FA: true,
-          message: 'Código 2FA necessário' 
-        } 
+        data: { requires2FA: true, message: 'Código 2FA necessário' } 
       });
     }
     
-    const isValid2FA = authenticator.verify({ token: twoFACode, secret: user.two_fa_secret! });
+    const isValid2FA = authenticator.verify({ token: twoFACode, secret: user.twoFASecret! });
     if (!isValid2FA) {
       logger.warn(`Failed 2FA attempt for ${sanitizedEmail}`, { ip });
       recordSuspiciousActivity(ip);
@@ -160,7 +114,7 @@ router.post('/auth/login', authLimiter, validateBody(loginSchema), async (req, r
     }
   }
   
-  const token = generateToken(user.id);
+  const token = generateToken(user._id);
   setAuthCookie(res, token);
   logger.info(`User logged in: ${sanitizedEmail}`, { ip });
   
@@ -168,33 +122,31 @@ router.post('/auth/login', authLimiter, validateBody(loginSchema), async (req, r
     data: {
       token,
       user: {
-        id: user.id,
+        id: user._id,
         email: user.email,
         name: user.name,
-        avatar: user.avatar || undefined,
-        twoFAEnabled: user.two_fa_enabled === 1,
-        createdAt: user.created_at,
-        updatedAt: user.updated_at,
+        avatar: user.avatar,
+        twoFAEnabled: user.twoFAEnabled,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt,
       },
     },
   });
 });
 
-router.post('/auth/logout', requireAuth, (req, res) => {
+router.post('/auth/logout', requireAuth, (_req, res) => {
   clearAuthCookie(res);
   res.json({ data: { message: 'Logout realizado com sucesso' } });
 });
 
-const forgotPasswordSchema = z.object({
-  email: z.string().email().max(254),
-});
+const forgotPasswordSchema = z.object({ email: z.string().email().max(254) });
 
 router.post('/auth/forgot-password', passwordResetLimiter, validateBody(forgotPasswordSchema), async (req, res) => {
   const { email } = req.body;
   const ip = getClientIP(req);
   
   const sanitizedEmail = sanitizeInput(email.toLowerCase().trim());
-  const user = queryOne<UserRow>('SELECT * FROM users WHERE email = ?', [sanitizedEmail]);
+  const user = await User.findOne({ email: sanitizedEmail });
   
   res.json({ data: { message: 'Se o email existir, um link de recuperação será enviado' } });
   
@@ -202,11 +154,12 @@ router.post('/auth/forgot-password', passwordResetLimiter, validateBody(forgotPa
     logger.info(`Password reset requested for non-existent email`, { ip });
     return;
   }
-  
-  const existingReset = queryOne<PasswordResetRow>(
-    'SELECT * FROM password_resets WHERE user_id = ? AND used = 0 AND expires_at > ?',
-    [user.id, new Date().toISOString()]
-  );
+
+  const existingReset = await PasswordReset.findOne({
+    userId: user._id,
+    used: false,
+    expiresAt: { $gt: new Date() }
+  });
   
   if (existingReset) {
     logger.info(`Password reset already pending for ${sanitizedEmail}`, { ip });
@@ -214,12 +167,14 @@ router.post('/auth/forgot-password', passwordResetLimiter, validateBody(forgotPa
   }
   
   const token = randomBytes(32).toString('hex');
-  const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+  const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
   
-  execute(
-    'INSERT INTO password_resets (id, user_id, token, expires_at) VALUES (?, ?, ?, ?)',
-    [nanoid(), user.id, token, expiresAt]
-  );
+  await PasswordReset.create({
+    _id: nanoid(),
+    userId: user._id,
+    token,
+    expiresAt,
+  });
   
   logger.info(`Password reset token generated for ${sanitizedEmail}`, { ip });
   await sendPasswordResetEmail(sanitizedEmail, token);
@@ -239,10 +194,11 @@ router.post('/auth/reset-password', passwordResetLimiter, validateBody(resetPass
     return res.status(400).json({ error: passwordValidation.message });
   }
   
-  const reset = queryOne<PasswordResetRow>(
-    'SELECT * FROM password_resets WHERE token = ? AND used = 0 AND expires_at > ?',
-    [token, new Date().toISOString()]
-  );
+  const reset = await PasswordReset.findOne({
+    token,
+    used: false,
+    expiresAt: { $gt: new Date() }
+  });
   
   if (!reset) {
     logger.warn(`Invalid password reset attempt`, { ip });
@@ -252,37 +208,34 @@ router.post('/auth/reset-password', passwordResetLimiter, validateBody(resetPass
   
   const passwordHash = await hashPassword(password);
   
-  execute('UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?', 
-    [passwordHash, new Date().toISOString(), reset.user_id]);
-  execute('UPDATE password_resets SET used = 1 WHERE id = ?', [reset.id]);
-  execute('DELETE FROM password_resets WHERE user_id = ? AND id != ?', [reset.user_id, reset.id]);
+  await User.findByIdAndUpdate(reset.userId, { passwordHash });
+  await PasswordReset.findByIdAndUpdate(reset._id, { used: true });
+  await PasswordReset.deleteMany({ userId: reset.userId, _id: { $ne: reset._id } });
   
-  logger.info(`Password reset completed for user ${reset.user_id}`, { ip });
-  
+  logger.info(`Password reset completed for user ${reset.userId}`, { ip });
   res.json({ data: { message: 'Senha redefinida com sucesso' } });
 });
 
-router.get('/auth/me', requireAuth, (req, res) => {
-  const user = req.user!;
-  const userRow = queryOne<UserRow>('SELECT two_fa_enabled FROM users WHERE id = ?', [user.id]);
+router.get('/auth/me', requireAuth, async (req, res) => {
+  const user = await User.findById(req.user!.id);
+  if (!user) return res.status(404).json({ error: 'Usuário não encontrado' });
+  
   res.json({
     data: {
-      id: user.id,
+      id: user._id,
       email: user.email,
       name: user.name,
       avatar: user.avatar,
-      twoFAEnabled: userRow?.two_fa_enabled === 1,
+      twoFAEnabled: user.twoFAEnabled,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
     },
   });
 });
 
-const avatarSchema = z.object({
-  avatar: z.string().max(500000),
-});
+const avatarSchema = z.object({ avatar: z.string().max(500000) });
 
-router.post('/auth/avatar', requireAuth, validateBody(avatarSchema), (req, res) => {
+router.post('/auth/avatar', requireAuth, validateBody(avatarSchema), async (req, res) => {
   const { avatar } = req.body;
   const userId = req.user!.id;
   
@@ -295,102 +248,64 @@ router.post('/auth/avatar', requireAuth, validateBody(avatarSchema), (req, res) 
     return res.status(400).json({ error: 'Imagem muito grande (máx 500KB)' });
   }
   
-  execute('UPDATE users SET avatar = ?, updated_at = ? WHERE id = ?', [avatar, new Date().toISOString(), userId]);
-  
+  await User.findByIdAndUpdate(userId, { avatar });
   res.json({ data: { avatar } });
 });
 
-router.delete('/auth/avatar', requireAuth, (req, res) => {
-  const userId = req.user!.id;
-  execute('UPDATE users SET avatar = NULL, updated_at = ? WHERE id = ?', [new Date().toISOString(), userId]);
+router.delete('/auth/avatar', requireAuth, async (req, res) => {
+  await User.findByIdAndUpdate(req.user!.id, { $unset: { avatar: 1 } });
   res.json({ data: { message: 'Avatar removido' } });
 });
 
-router.get('/auth/2fa/status', requireAuth, (req, res) => {
-  const userId = req.user!.id;
-  const user = queryOne<UserRow>('SELECT two_fa_enabled FROM users WHERE id = ?', [userId]);
-  res.json({ data: { enabled: user?.two_fa_enabled === 1 } });
+router.get('/auth/2fa/status', requireAuth, async (req, res) => {
+  const user = await User.findById(req.user!.id);
+  res.json({ data: { enabled: user?.twoFAEnabled || false } });
 });
 
 router.post('/auth/2fa/setup', requireAuth, async (req, res) => {
-  const userId = req.user!.id;
-  const user = queryOne<UserRow>('SELECT * FROM users WHERE id = ?', [userId]);
+  const user = await User.findById(req.user!.id);
   
-  if (!user) {
-    return res.status(404).json({ error: 'Usuário não encontrado' });
-  }
-  
-  if (user.two_fa_enabled === 1) {
-    return res.status(400).json({ error: '2FA já está ativado' });
-  }
+  if (!user) return res.status(404).json({ error: 'Usuário não encontrado' });
+  if (user.twoFAEnabled) return res.status(400).json({ error: '2FA já está ativado' });
   
   const secret = authenticator.generateSecret();
   const otpauth = authenticator.keyuri(user.email, 'Smart Shortener', secret);
   
   try {
     const qrCode = await QRCode.toDataURL(otpauth);
-    
-    execute('UPDATE users SET two_fa_secret = ? WHERE id = ?', [secret, userId]);
-    
-    res.json({ 
-      data: { 
-        secret,
-        qrCode,
-        otpauth
-      } 
-    });
-  } catch (err) {
+    await User.findByIdAndUpdate(user._id, { twoFASecret: secret });
+    res.json({ data: { secret, qrCode, otpauth } });
+  } catch {
     res.status(500).json({ error: 'Erro ao gerar QR Code' });
   }
 });
 
-const verify2FASchema = z.object({
-  code: z.string().length(6),
-});
+const verify2FASchema = z.object({ code: z.string().length(6) });
 
-router.post('/auth/2fa/verify', requireAuth, validateBody(verify2FASchema), (req, res) => {
+router.post('/auth/2fa/verify', requireAuth, validateBody(verify2FASchema), async (req, res) => {
   const { code } = req.body;
-  const userId = req.user!.id;
+  const user = await User.findById(req.user!.id);
   
-  const user = queryOne<UserRow>('SELECT two_fa_secret, two_fa_enabled FROM users WHERE id = ?', [userId]);
+  if (!user?.twoFASecret) return res.status(400).json({ error: 'Configure o 2FA primeiro' });
+  if (user.twoFAEnabled) return res.status(400).json({ error: '2FA já está ativado' });
   
-  if (!user || !user.two_fa_secret) {
-    return res.status(400).json({ error: 'Configure o 2FA primeiro' });
-  }
+  const isValid = authenticator.verify({ token: code, secret: user.twoFASecret });
+  if (!isValid) return res.status(400).json({ error: 'Código inválido' });
   
-  if (user.two_fa_enabled === 1) {
-    return res.status(400).json({ error: '2FA já está ativado' });
-  }
-  
-  const isValid = authenticator.verify({ token: code, secret: user.two_fa_secret });
-  
-  if (!isValid) {
-    return res.status(400).json({ error: 'Código inválido' });
-  }
-  
-  execute('UPDATE users SET two_fa_enabled = 1, updated_at = ? WHERE id = ?', [new Date().toISOString(), userId]);
-  
+  await User.findByIdAndUpdate(user._id, { twoFAEnabled: true });
   res.json({ data: { message: '2FA ativado com sucesso' } });
 });
 
-router.post('/auth/2fa/disable', requireAuth, validateBody(verify2FASchema), (req, res) => {
+router.post('/auth/2fa/disable', requireAuth, validateBody(verify2FASchema), async (req, res) => {
   const { code } = req.body;
-  const userId = req.user!.id;
+  const user = await User.findById(req.user!.id);
   
-  const user = queryOne<UserRow>('SELECT two_fa_secret, two_fa_enabled FROM users WHERE id = ?', [userId]);
+  if (!user?.twoFAEnabled) return res.status(400).json({ error: '2FA não está ativado' });
   
-  if (!user || user.two_fa_enabled !== 1) {
-    return res.status(400).json({ error: '2FA não está ativado' });
-  }
+  const isValid = authenticator.verify({ token: code, secret: user.twoFASecret! });
+  if (!isValid) return res.status(400).json({ error: 'Código inválido' });
   
-  const isValid = authenticator.verify({ token: code, secret: user.two_fa_secret! });
-  
-  if (!isValid) {
-    return res.status(400).json({ error: 'Código inválido' });
-  }
-  
-  execute('UPDATE users SET two_fa_enabled = 0, two_fa_secret = NULL, updated_at = ? WHERE id = ?', [new Date().toISOString(), userId]);
-  
+  await User.findByIdAndUpdate(user._id, { twoFAEnabled: false, $unset: { twoFASecret: 1 } });
   res.json({ data: { message: '2FA desativado com sucesso' } });
 });
 
@@ -409,12 +324,10 @@ router.post('/auth/change-password', requireAuth, authLimiter, validateBody(chan
     return res.status(400).json({ error: passwordValidation.message });
   }
   
-  const user = queryOne<UserRow>('SELECT * FROM users WHERE id = ?', [userId]);
-  if (!user) {
-    return res.status(404).json({ error: 'Usuário não encontrado' });
-  }
+  const user = await User.findById(userId);
+  if (!user) return res.status(404).json({ error: 'Usuário não encontrado' });
   
-  const valid = await verifyPassword(currentPassword, user.password_hash);
+  const valid = await verifyPassword(currentPassword, user.passwordHash);
   if (!valid) {
     logger.warn(`Failed password change attempt for user ${userId}`, { ip });
     recordSuspiciousActivity(ip);
@@ -422,35 +335,27 @@ router.post('/auth/change-password', requireAuth, authLimiter, validateBody(chan
   }
   
   const newPasswordHash = await hashPassword(newPassword);
-  execute('UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?', [newPasswordHash, new Date().toISOString(), userId]);
+  await User.findByIdAndUpdate(userId, { passwordHash: newPasswordHash });
   
   clearAuthCookie(res);
   logger.info(`Password changed for user ${userId}`, { ip });
-  
   res.json({ data: { message: 'Senha alterada com sucesso' } });
 });
 
-const updateProfileSchema = z.object({
-  name: z.string().min(2).optional(),
-});
+const updateProfileSchema = z.object({ name: z.string().min(2).optional() });
 
-router.patch('/auth/profile', requireAuth, validateBody(updateProfileSchema), (req, res) => {
+router.patch('/auth/profile', requireAuth, validateBody(updateProfileSchema), async (req, res) => {
   const { name } = req.body;
-  const userId = req.user!.id;
+  if (name) await User.findByIdAndUpdate(req.user!.id, { name });
   
-  if (name) {
-    execute('UPDATE users SET name = ?, updated_at = ? WHERE id = ?', [name, new Date().toISOString(), userId]);
-  }
-  
-  const user = queryOne<UserRow>('SELECT * FROM users WHERE id = ?', [userId])!;
-  
+  const user = await User.findById(req.user!.id);
   res.json({
     data: {
-      id: user.id,
-      email: user.email,
-      name: user.name,
-      createdAt: user.created_at,
-      updatedAt: user.updated_at,
+      id: user!._id,
+      email: user!.email,
+      name: user!.name,
+      createdAt: user!.createdAt,
+      updatedAt: user!.updatedAt,
     },
   });
 });
@@ -458,62 +363,47 @@ router.patch('/auth/profile', requireAuth, validateBody(updateProfileSchema), (r
 router.delete('/auth/account', requireAuth, async (req, res) => {
   const userId = req.user!.id;
   
-  execute('DELETE FROM click_events WHERE link_id IN (SELECT id FROM links WHERE owner_id = ?)', [userId]);
-  execute('DELETE FROM links WHERE owner_id = ?', [userId]);
-  execute('DELETE FROM api_keys WHERE owner_id = ?', [userId]);
-  execute('DELETE FROM webhooks WHERE owner_id = ?', [userId]);
-  execute('DELETE FROM users WHERE id = ?', [userId]);
+  const links = await Link.find({ ownerId: userId });
+  for (const link of links) {
+    await ClickEvent.deleteMany({ linkId: link._id });
+  }
+  
+  await Link.deleteMany({ ownerId: userId });
+  await ApiKey.deleteMany({ ownerId: userId });
+  await Webhook.deleteMany({ ownerId: userId });
+  await User.findByIdAndDelete(userId);
   
   res.status(204).send();
 });
 
-router.get('/stats/public', searchLimiter, (_, res) => {
-  const totalLinks = queryOne<{ count: number }>('SELECT COUNT(*) as count FROM links');
-  const totalClicks = queryOne<{ total: number }>('SELECT COALESCE(SUM(total_clicks), 0) as total FROM links');
-  const totalUsers = queryOne<{ count: number }>('SELECT COUNT(*) as count FROM users');
+router.get('/stats/public', searchLimiter, async (_req, res) => {
+  const totalLinks = await Link.countDocuments();
+  const totalUsers = await User.countDocuments();
+  const linksAgg = await Link.aggregate([{ $group: { _id: null, total: { $sum: '$totalClicks' } } }]);
+  const totalClicks = linksAgg[0]?.total || 0;
   
-  res.json({
-    data: {
-      totalLinks: totalLinks?.count || 0,
-      totalClicks: totalClicks?.total || 0,
-      totalUsers: totalUsers?.count || 0,
-    },
-  });
+  res.json({ data: { totalLinks, totalClicks, totalUsers } });
 });
 
-router.get('/stats/dashboard', requireAuth, (req, res) => {
+router.get('/stats/dashboard', requireAuth, async (req, res) => {
   const userId = req.user!.id;
   
-  const linksCount = queryOne<{ count: number }>(
-    'SELECT COUNT(*) as count FROM links WHERE owner_id = ?',
-    [userId]
-  );
+  const linksCount = await Link.countDocuments({ ownerId: userId });
+  const linksAgg = await Link.aggregate([
+    { $match: { ownerId: userId } },
+    { $group: { _id: null, totalClicks: { $sum: '$totalClicks' }, clicksToday: { $sum: '$clicksToday' } } }
+  ]);
   
-  const clicksTotal = queryOne<{ total: number }>(
-    'SELECT COALESCE(SUM(total_clicks), 0) as total FROM links WHERE owner_id = ?',
-    [userId]
-  );
+  const totalClicks = linksAgg[0]?.totalClicks || 0;
+  const clicksToday = linksAgg[0]?.clicksToday || 0;
   
-  const clicksToday = queryOne<{ total: number }>(
-    'SELECT COALESCE(SUM(clicks_today), 0) as total FROM links WHERE owner_id = ?',
-    [userId]
-  );
+  const links = await Link.find({ ownerId: userId });
+  const linkIds = links.map(l => l._id);
   
-  const linkIds = queryAll<{ id: string }>(
-    'SELECT id FROM links WHERE owner_id = ?',
-    [userId]
-  ).map(r => r.id);
-  
-  let botsBlocked = 0;
-  if (linkIds.length > 0) {
-    const placeholders = linkIds.map(() => '?').join(',');
-    const bots = queryOne<{ count: number }>(
-      `SELECT COUNT(*) as count FROM click_events WHERE link_id IN (${placeholders}) AND is_bot = 1`,
-      linkIds
-    );
-    botsBlocked = bots?.count || 0;
-  }
-  
+  const botsBlocked = linkIds.length > 0 
+    ? await ClickEvent.countDocuments({ linkId: { $in: linkIds }, isBot: true })
+    : 0;
+
   const clicksByDay = [];
   for (let i = 6; i >= 0; i--) {
     const date = new Date();
@@ -521,44 +411,20 @@ router.get('/stats/dashboard', requireAuth, (req, res) => {
     const dateStr = date.toISOString().split('T')[0];
     const dayLabel = date.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' });
     
-    let clicks = 0;
-    if (linkIds.length > 0) {
-      const placeholders = linkIds.map(() => '?').join(',');
-      const result = queryOne<{ count: number }>(
-        `SELECT COUNT(*) as count FROM click_events WHERE link_id IN (${placeholders}) AND date(timestamp) = ?`,
-        [...linkIds, dateStr]
-      );
-      clicks = result?.count || 0;
-    }
+    const clicks = linkIds.length > 0 
+      ? await clickRepository.getClicksForDate(linkIds, dateStr)
+      : 0;
     
     clicksByDay.push({ date: dayLabel, clicks });
   }
   
-  res.json({
-    data: {
-      totalLinks: linksCount?.count || 0,
-      totalClicks: clicksTotal?.total || 0,
-      clicksToday: clicksToday?.total || 0,
-      botsBlocked,
-      clicksByDay,
-    },
-  });
+  res.json({ data: { totalLinks: linksCount, totalClicks, clicksToday, botsBlocked, clicksByDay } });
 });
 
 const createLinkSchema = z.object({
   url: z.string().url(),
   customCode: z.string().min(3).max(32).optional(),
-  rules: z.array(z.object({
-    id: z.string(),
-    priority: z.number(),
-    conditions: z.array(z.object({
-      field: z.string(),
-      operator: z.enum(['eq', 'neq', 'in', 'nin', 'gt', 'lt', 'gte', 'lte', 'contains']),
-      value: z.union([z.string(), z.number(), z.array(z.string())]),
-    })),
-    targetUrl: z.string().url(),
-    active: z.boolean(),
-  })).optional(),
+  rules: z.array(z.any()).optional(),
   limits: z.object({
     maxClicks: z.number().optional(),
     maxClicksPerDay: z.number().optional(),
@@ -572,249 +438,172 @@ const createLinkSchema = z.object({
 });
 
 const updateLinkSchema = createLinkSchema.partial();
-
 const listQuerySchema = z.object({
   limit: z.coerce.number().min(1).max(100).default(20),
   offset: z.coerce.number().min(0).default(0),
-  state: z.enum(['active', 'paused', 'expired', 'dead', 'viral']).optional(),
 });
 
-router.get('/links',
-  requireAuth,
-  requirePermission('links:read'),
-  validateQuery(listQuerySchema),
-  (req, res) => {
-    const { limit, offset } = req.query as unknown as { limit: number; offset: number };
-    const links = linkRepository.findByOwner(req.user!.id, limit, offset);
-    res.json({ data: links, meta: { limit, offset, count: links.length } });
-  }
-);
+router.get('/links', requireAuth, requirePermission('links:read'), validateQuery(listQuerySchema), async (req, res) => {
+  const { limit, offset } = req.query as unknown as { limit: number; offset: number };
+  const links = await linkRepository.findByOwner(req.user!.id, limit, offset);
+  res.json({ data: links, meta: { limit, offset, count: links.length } });
+});
 
-router.post('/links',
-  requireAuth,
-  requirePermission('links:write'),
-  createLinkLimiter,
-  validateBody(createLinkSchema),
-  (req, res) => {
-    const data = req.body as z.infer<typeof createLinkSchema>;
-    
-    const urlValidation = validateUrl(data.url);
-    if (!urlValidation.valid) {
-      return res.status(400).json({ error: urlValidation.error });
-    }
-    
-    const sanitizedUrl = sanitizeUrl(data.url);
-    
-    if (data.customCode) {
-      const existing = linkRepository.findByShortCode(data.customCode);
-      if (existing) {
-        return res.status(409).json({ error: 'Código já está em uso' });
-      }
-    }
-    
-    const link = linkRepository.create({
-      originalUrl: sanitizedUrl,
-      ownerId: req.user!.id,
-      customCode: data.customCode,
-      rules: data.rules as any,
-      limits: data.limits as any,
-      tags: data.tags,
-      campaign: data.campaign,
-    });
-    
-    res.status(201).json({ data: link });
+router.post('/links', requireAuth, requirePermission('links:write'), createLinkLimiter, validateBody(createLinkSchema), async (req, res) => {
+  const data = req.body;
+  
+  const urlValidation = validateUrl(data.url);
+  if (!urlValidation.valid) return res.status(400).json({ error: urlValidation.error });
+  
+  const sanitizedUrl = sanitizeUrl(data.url);
+  
+  if (data.customCode) {
+    const existing = await linkRepository.findByShortCode(data.customCode);
+    if (existing) return res.status(409).json({ error: 'Código já está em uso' });
   }
-);
+  
+  const link = await linkRepository.create({
+    originalUrl: sanitizedUrl,
+    ownerId: req.user!.id,
+    customCode: data.customCode,
+    rules: data.rules,
+    limits: data.limits,
+    tags: data.tags,
+    campaign: data.campaign,
+  });
+  
+  res.status(201).json({ data: link });
+});
 
-router.get('/links/:id',
-  requireAuth,
-  requirePermission('links:read'),
-  (req, res) => {
-    const link = linkRepository.findById(req.params.id);
-    
-    if (!link) return res.status(404).json({ error: 'Link não encontrado' });
-    if (link.ownerId !== req.user!.id) return res.status(403).json({ error: 'Acesso negado' });
-    
-    res.json({ data: link });
-  }
-);
+router.get('/links/:id', requireAuth, requirePermission('links:read'), async (req, res) => {
+  const link = await linkRepository.findById(req.params.id);
+  if (!link) return res.status(404).json({ error: 'Link não encontrado' });
+  if (link.ownerId !== req.user!.id) return res.status(403).json({ error: 'Acesso negado' });
+  res.json({ data: link });
+});
 
-router.patch('/links/:id',
-  requireAuth,
-  requirePermission('links:write'),
-  validateBody(updateLinkSchema),
-  (req, res) => {
-    const link = linkRepository.findById(req.params.id);
-    
-    if (!link) return res.status(404).json({ error: 'Link não encontrado' });
-    if (link.ownerId !== req.user!.id) return res.status(403).json({ error: 'Acesso negado' });
-    
-    const data = req.body as z.infer<typeof updateLinkSchema>;
-    const updated = linkRepository.update(req.params.id, {
-      defaultTargetUrl: data.url,
-      rules: data.rules as any,
-      limits: data.limits as any,
-      tags: data.tags,
-      campaign: data.campaign,
-    });
-    
-    res.json({ data: updated });
-  }
-);
+router.patch('/links/:id', requireAuth, requirePermission('links:write'), validateBody(updateLinkSchema), async (req, res) => {
+  const link = await linkRepository.findById(req.params.id);
+  if (!link) return res.status(404).json({ error: 'Link não encontrado' });
+  if (link.ownerId !== req.user!.id) return res.status(403).json({ error: 'Acesso negado' });
+  
+  const data = req.body;
+  const updated = await linkRepository.update(req.params.id, {
+    defaultTargetUrl: data.url,
+    rules: data.rules,
+    limits: data.limits,
+    tags: data.tags,
+    campaign: data.campaign,
+  });
+  
+  res.json({ data: updated });
+});
 
-router.delete('/links/:id',
-  requireAuth,
-  requirePermission('links:delete'),
-  (req, res) => {
-    const link = linkRepository.findById(req.params.id);
-    
-    if (!link) return res.status(404).json({ error: 'Link não encontrado' });
-    if (link.ownerId !== req.user!.id) return res.status(403).json({ error: 'Acesso negado' });
-    
-    linkRepository.delete(req.params.id);
-    res.status(204).send();
-  }
-);
+router.delete('/links/:id', requireAuth, requirePermission('links:delete'), async (req, res) => {
+  const link = await linkRepository.findById(req.params.id);
+  if (!link) return res.status(404).json({ error: 'Link não encontrado' });
+  if (link.ownerId !== req.user!.id) return res.status(403).json({ error: 'Acesso negado' });
+  
+  await clickRepository.deleteByLink(req.params.id);
+  await linkRepository.delete(req.params.id);
+  res.status(204).send();
+});
 
-router.post('/links/:id/pause',
-  requireAuth,
-  requirePermission('links:write'),
-  (req, res) => {
-    const link = linkRepository.findById(req.params.id);
-    
-    if (!link || link.ownerId !== req.user!.id) {
-      return res.status(404).json({ error: 'Link não encontrado' });
-    }
-    
-    const updated = linkRepository.update(req.params.id, { state: 'paused' });
-    res.json({ data: updated });
-  }
-);
+router.post('/links/:id/pause', requireAuth, requirePermission('links:write'), async (req, res) => {
+  const link = await linkRepository.findById(req.params.id);
+  if (!link || link.ownerId !== req.user!.id) return res.status(404).json({ error: 'Link não encontrado' });
+  
+  const updated = await linkRepository.update(req.params.id, { state: 'paused' });
+  res.json({ data: updated });
+});
 
-router.post('/links/:id/activate',
-  requireAuth,
-  requirePermission('links:write'),
-  (req, res) => {
-    const link = linkRepository.findById(req.params.id);
-    
-    if (!link || link.ownerId !== req.user!.id) {
-      return res.status(404).json({ error: 'Link não encontrado' });
-    }
-    
-    const updated = linkRepository.update(req.params.id, { state: 'active' });
-    res.json({ data: updated });
-  }
-);
+router.post('/links/:id/activate', requireAuth, requirePermission('links:write'), async (req, res) => {
+  const link = await linkRepository.findById(req.params.id);
+  if (!link || link.ownerId !== req.user!.id) return res.status(404).json({ error: 'Link não encontrado' });
+  
+  const updated = await linkRepository.update(req.params.id, { state: 'active' });
+  res.json({ data: updated });
+});
 
-router.get('/links/:id/analytics',
-  requireAuth,
-  requirePermission('analytics:read'),
-  (req, res) => {
-    const link = linkRepository.findById(req.params.id);
-    
-    if (!link || link.ownerId !== req.user!.id) {
-      return res.status(404).json({ error: 'Link não encontrado' });
-    }
-    
-    const analytics = {
-      totalClicks: link.totalClicks,
-      uniqueClicks: link.uniqueClicks,
-      clicksToday: link.clicksToday,
-      byCountry: clickRepository.getClicksByCountry(link.id),
-      byDevice: clickRepository.getClicksByDevice(link.id),
-      byHour: clickRepository.getClicksByHour(link.id),
-      botClicks: clickRepository.getBotClicks(link.id),
-      suspiciousClicks: clickRepository.getSuspiciousClicks(link.id),
-    };
-    
-    res.json({ data: analytics });
-  }
-);
+router.get('/links/:id/analytics', requireAuth, requirePermission('analytics:read'), async (req, res) => {
+  const link = await linkRepository.findById(req.params.id);
+  if (!link || link.ownerId !== req.user!.id) return res.status(404).json({ error: 'Link não encontrado' });
+  
+  const analytics = {
+    totalClicks: link.totalClicks,
+    uniqueClicks: link.uniqueClicks,
+    clicksToday: link.clicksToday,
+    byCountry: await clickRepository.getClicksByCountry(link.id),
+    byDevice: await clickRepository.getClicksByDevice(link.id),
+    byHour: await clickRepository.getClicksByHour(link.id),
+    botClicks: await clickRepository.getBotClicks(link.id),
+    suspiciousClicks: await clickRepository.getSuspiciousClicks(link.id),
+  };
+  
+  res.json({ data: analytics });
+});
 
-router.get('/links/:id/clicks',
-  requireAuth,
-  requirePermission('analytics:read'),
-  validateQuery(listQuerySchema),
-  (req, res) => {
-    const link = linkRepository.findById(req.params.id);
-    
-    if (!link || link.ownerId !== req.user!.id) {
-      return res.status(404).json({ error: 'Link não encontrado' });
-    }
-    
-    const { limit, offset } = req.query as unknown as { limit: number; offset: number };
-    const clicks = clickRepository.findByLink(link.id, limit, offset);
-    
-    res.json({ data: clicks, meta: { limit, offset, count: clicks.length } });
-  }
-);
+router.get('/links/:id/clicks', requireAuth, requirePermission('analytics:read'), validateQuery(listQuerySchema), async (req, res) => {
+  const link = await linkRepository.findById(req.params.id);
+  if (!link || link.ownerId !== req.user!.id) return res.status(404).json({ error: 'Link não encontrado' });
+  
+  const { limit, offset } = req.query as unknown as { limit: number; offset: number };
+  const clicks = await clickRepository.findByLink(link.id, limit, offset);
+  res.json({ data: clicks, meta: { limit, offset, count: clicks.length } });
+});
 
-router.get('/links/:id/export',
-  requireAuth,
-  requirePermission('analytics:read'),
-  (req, res) => {
-    const link = linkRepository.findById(req.params.id);
-    
-    if (!link || link.ownerId !== req.user!.id) {
-      return res.status(404).json({ error: 'Link não encontrado' });
-    }
-    
-    const clicks = clickRepository.findByLink(link.id, 10000, 0);
-    
-    const headers = ['Data', 'País', 'Dispositivo', 'Navegador', 'Referrer', 'Bot', 'Suspeito'];
-    const rows = clicks.map(c => [
-      c.timestamp,
-      c.country || '',
-      c.device,
-      c.browser,
-      c.referrer || 'Direto',
-      c.isBot ? 'Sim' : 'Não',
-      c.isSuspicious ? 'Sim' : 'Não',
-    ]);
-    
-    const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
-    
-    res.setHeader('Content-Type', 'text/csv');
-    res.setHeader('Content-Disposition', `attachment; filename="${link.shortCode}-analytics.csv"`);
-    res.send(csv);
-  }
-);
+router.get('/links/:id/export', requireAuth, requirePermission('analytics:read'), async (req, res) => {
+  const link = await linkRepository.findById(req.params.id);
+  if (!link || link.ownerId !== req.user!.id) return res.status(404).json({ error: 'Link não encontrado' });
+  
+  const clicks = await clickRepository.findByLink(link.id, 10000, 0);
+  
+  const headers = ['Data', 'País', 'Dispositivo', 'Navegador', 'Referrer', 'Bot', 'Suspeito'];
+  const rows = clicks.map(c => [
+    c.timestamp,
+    c.country || '',
+    c.device,
+    c.browser,
+    c.referrer || 'Direto',
+    c.isBot ? 'Sim' : 'Não',
+    c.isSuspicious ? 'Sim' : 'Não',
+  ]);
+  
+  const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+  
+  res.setHeader('Content-Type', 'text/csv');
+  res.setHeader('Content-Disposition', `attachment; filename="${link.shortCode}-analytics.csv"`);
+  res.send(csv);
+});
 
 const createApiKeySchema = z.object({
   name: z.string().min(1).max(50),
   permissions: z.array(z.string()).default(['links:read']),
 });
 
-router.get('/api-keys', requireAuth, searchLimiter, (req, res) => {
-  const keys = queryAll<ApiKeyRow>(
-    'SELECT id, name, permissions_json, last_used_at, created_at FROM api_keys WHERE owner_id = ? AND active = 1',
-    [req.user!.id]
-  );
+router.get('/api-keys', requireAuth, searchLimiter, async (req, res) => {
+  const keys = await ApiKey.find({ ownerId: req.user!.id, active: true });
   
   res.json({
     data: keys.map(k => ({
-      id: k.id,
+      id: k._id,
       name: k.name,
-      lastChars: k.id.slice(-4),
-      permissions: JSON.parse(k.permissions_json),
-      lastUsed: k.last_used_at,
-      createdAt: k.created_at,
+      lastChars: k._id.slice(-4),
+      permissions: k.permissions,
+      lastUsed: k.lastUsedAt,
+      createdAt: k.createdAt,
     })),
   });
 });
 
-router.post('/api-keys', requireAuth, apiKeyLimiter, validateBody(createApiKeySchema), (req, res) => {
+router.post('/api-keys', requireAuth, apiKeyLimiter, validateBody(createApiKeySchema), async (req, res) => {
   const { name, permissions } = req.body;
   const ip = getClientIP(req);
   
   const sanitizedName = sanitizeInput(name.trim());
+  const existingCount = await ApiKey.countDocuments({ ownerId: req.user!.id, active: true });
   
-  const existingCount = queryOne<{ count: number }>(
-    'SELECT COUNT(*) as count FROM api_keys WHERE owner_id = ? AND active = 1',
-    [req.user!.id]
-  );
-  
-  if ((existingCount?.count || 0) >= 10) {
+  if (existingCount >= 10) {
     return res.status(400).json({ error: 'Limite máximo de chaves API atingido (10)' });
   }
   
@@ -822,35 +611,26 @@ router.post('/api-keys', requireAuth, apiKeyLimiter, validateBody(createApiKeySc
   const rawKey = `sk_live_${nanoid(32)}`;
   const keyHash = createHash('sha256').update(rawKey).digest('hex');
   
-  execute(
-    'INSERT INTO api_keys (id, key_hash, name, owner_id, permissions_json) VALUES (?, ?, ?, ?, ?)',
-    [id, keyHash, sanitizedName, req.user!.id, JSON.stringify(permissions)]
-  );
+  await ApiKey.create({
+    _id: id,
+    keyHash,
+    name: sanitizedName,
+    ownerId: req.user!.id,
+    permissions,
+  });
   
   logger.info(`API key created for user ${req.user!.id}`, { ip });
   
   res.status(201).json({
-    data: {
-      id,
-      name: sanitizedName,
-      key: rawKey,
-      permissions,
-      createdAt: new Date().toISOString(),
-    },
+    data: { id, name: sanitizedName, key: rawKey, permissions, createdAt: new Date().toISOString() },
   });
 });
 
-router.delete('/api-keys/:id', requireAuth, (req, res) => {
-  const key = queryOne<ApiKeyRow>(
-    'SELECT * FROM api_keys WHERE id = ? AND owner_id = ?',
-    [req.params.id, req.user!.id]
-  );
+router.delete('/api-keys/:id', requireAuth, async (req, res) => {
+  const key = await ApiKey.findOne({ _id: req.params.id, ownerId: req.user!.id });
+  if (!key) return res.status(404).json({ error: 'Chave API não encontrada' });
   
-  if (!key) {
-    return res.status(404).json({ error: 'Chave API não encontrada' });
-  }
-  
-  execute('UPDATE api_keys SET active = 0 WHERE id = ?', [req.params.id]);
+  await ApiKey.findByIdAndUpdate(req.params.id, { active: false });
   res.status(204).send();
 });
 
@@ -859,82 +639,58 @@ const createWebhookSchema = z.object({
   events: z.array(z.string()).min(1),
 });
 
-router.get('/webhooks', requireAuth, (req, res) => {
-  const webhooks = queryAll<WebhookRow>(
-    'SELECT * FROM webhooks WHERE owner_id = ?',
-    [req.user!.id]
-  );
+router.get('/webhooks', requireAuth, async (req, res) => {
+  const webhooks = await Webhook.find({ ownerId: req.user!.id });
   
   res.json({
     data: webhooks.map(w => ({
-      id: w.id,
+      id: w._id,
       url: w.url,
-      events: JSON.parse(w.events_json),
-      active: w.active === 1,
-      createdAt: w.created_at,
+      events: w.events,
+      active: w.active,
+      createdAt: w.createdAt,
     })),
   });
 });
 
-router.post('/webhooks', requireAuth, validateBody(createWebhookSchema), (req, res) => {
+router.post('/webhooks', requireAuth, validateBody(createWebhookSchema), async (req, res) => {
   const { url, events } = req.body;
   
   const id = nanoid();
   const secret = nanoid(32);
   
-  execute(
-    'INSERT INTO webhooks (id, owner_id, url, secret, events_json) VALUES (?, ?, ?, ?, ?)',
-    [id, req.user!.id, url, secret, JSON.stringify(events)]
-  );
+  await Webhook.create({
+    _id: id,
+    ownerId: req.user!.id,
+    url,
+    secret,
+    events,
+  });
   
   res.status(201).json({
-    data: {
-      id,
-      url,
-      events,
-      secret,
-      active: true,
-      createdAt: new Date().toISOString(),
-    },
+    data: { id, url, events, secret, active: true, createdAt: new Date().toISOString() },
   });
 });
 
-router.patch('/webhooks/:id', requireAuth, (req, res) => {
-  const webhook = queryOne<WebhookRow>(
-    'SELECT * FROM webhooks WHERE id = ? AND owner_id = ?',
-    [req.params.id, req.user!.id]
-  );
-  
-  if (!webhook) {
-    return res.status(404).json({ error: 'Webhook não encontrado' });
-  }
+router.patch('/webhooks/:id', requireAuth, async (req, res) => {
+  const webhook = await Webhook.findOne({ _id: req.params.id, ownerId: req.user!.id });
+  if (!webhook) return res.status(404).json({ error: 'Webhook não encontrado' });
   
   const { active } = req.body;
   if (typeof active === 'boolean') {
-    execute('UPDATE webhooks SET active = ? WHERE id = ?', [active ? 1 : 0, req.params.id]);
+    await Webhook.findByIdAndUpdate(req.params.id, { active });
   }
   
   res.json({
-    data: {
-      id: webhook.id,
-      url: webhook.url,
-      events: JSON.parse(webhook.events_json),
-      active: active ?? webhook.active === 1,
-    },
+    data: { id: webhook._id, url: webhook.url, events: webhook.events, active: active ?? webhook.active },
   });
 });
 
-router.delete('/webhooks/:id', requireAuth, (req, res) => {
-  const webhook = queryOne<WebhookRow>(
-    'SELECT * FROM webhooks WHERE id = ? AND owner_id = ?',
-    [req.params.id, req.user!.id]
-  );
+router.delete('/webhooks/:id', requireAuth, async (req, res) => {
+  const webhook = await Webhook.findOne({ _id: req.params.id, ownerId: req.user!.id });
+  if (!webhook) return res.status(404).json({ error: 'Webhook não encontrado' });
   
-  if (!webhook) {
-    return res.status(404).json({ error: 'Webhook não encontrado' });
-  }
-  
-  execute('DELETE FROM webhooks WHERE id = ?', [req.params.id]);
+  await Webhook.findByIdAndDelete(req.params.id);
   res.status(204).send();
 });
 

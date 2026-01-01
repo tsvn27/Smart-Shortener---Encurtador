@@ -3,14 +3,12 @@ import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
 import cookieParser from 'cookie-parser';
-import { initDb, closeDb } from './db/index.js';
-import { generalLimiter, redirectLimiter, strictLimiter } from './lib/rate-limiter.js';
+import { connectDB, disconnectDB } from './db/index.js';
+import { generalLimiter, redirectLimiter } from './lib/rate-limiter.js';
 import { logger } from './lib/logger.js';
 import { securityMiddleware, securityHeaders, getClientIP } from './lib/security.js';
 import { handleRedirect, handlePreview } from './handlers/redirect-handler.js';
 import apiV1Routes from './api/v1/routes.js';
-
-initDb();
 
 const app = express();
 const PORT = process.env.PORT || 3002;
@@ -123,7 +121,7 @@ app.get('/geo-blocked', (_, res) => {
   res.status(403).send(`<!DOCTYPE html><html><head><title>Acesso restrito</title><style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:system-ui,-apple-system,sans-serif;background:#0a0a0b;color:#fafafa;min-height:100vh;display:flex;align-items:center;justify-content:center}.container{text-align:center;padding:40px}h1{font-size:2rem;margin-bottom:1rem}p{color:#888;margin-bottom:2rem}a{color:#6366f1;text-decoration:none}a:hover{text-decoration:underline}</style></head><body><div class="container"><h1>Acesso restrito</h1><p>Este link não está disponível na sua região.</p><a href="/">Voltar ao início</a></div></body></html>`);
 });
 
-app.use((err: Error, req: express.Request, res: express.Response, next: express.NextFunction) => {
+app.use((err: Error, req: express.Request, res: express.Response, _next: express.NextFunction) => {
   const ip = getClientIP(req);
   logger.error(`Error: ${err.message}`, { stack: err.stack, path: req.path, ip });
   
@@ -138,30 +136,28 @@ app.use((_, res) => {
   res.status(404).json({ error: 'Não encontrado' });
 });
 
-const server = app.listen(PORT, () => {
-  logger.info(`Server running on http://localhost:${PORT}`);
-});
-
-server.keepAliveTimeout = 65000;
-server.headersTimeout = 66000;
-
-process.on('SIGTERM', () => {
-  logger.info('SIGTERM received, shutting down gracefully');
-  server.close(() => {
-    closeDb();
-    logger.info('Server closed');
-    process.exit(0);
+async function startServer() {
+  await connectDB();
+  
+  const server = app.listen(PORT, () => {
+    logger.info(`Server running on http://localhost:${PORT}`);
   });
-});
 
-process.on('SIGINT', () => {
-  logger.info('SIGINT received, shutting down gracefully');
-  server.close(() => {
-    closeDb();
-    logger.info('Server closed');
-    process.exit(0);
-  });
-});
+  server.keepAliveTimeout = 65000;
+  server.headersTimeout = 66000;
+
+  const shutdown = async () => {
+    logger.info('Shutting down gracefully');
+    server.close(async () => {
+      await disconnectDB();
+      logger.info('Server closed');
+      process.exit(0);
+    });
+  };
+
+  process.on('SIGTERM', shutdown);
+  process.on('SIGINT', shutdown);
+}
 
 process.on('uncaughtException', (err) => {
   logger.error('Uncaught exception', { error: err.message, stack: err.stack });
@@ -171,3 +167,5 @@ process.on('uncaughtException', (err) => {
 process.on('unhandledRejection', (reason) => {
   logger.error('Unhandled rejection', { reason });
 });
+
+startServer();

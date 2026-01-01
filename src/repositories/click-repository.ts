@@ -1,158 +1,109 @@
 import { nanoid } from 'nanoid';
-import { queryOne, queryAll, execute } from '../db/index.js';
-import type { ClickEvent } from '../types/index.js';
+import { ClickEvent, IClickEvent } from '../db/index.js';
+import type { ClickEvent as ClickEventType } from '../types/index.js';
 
-interface ClickRow {
-  id: string;
-  link_id: string;
-  timestamp: string;
-  ip: string;
-  ip_hash: string;
-  user_agent: string | null;
-  fingerprint: string | null;
-  country: string | null;
-  city: string | null;
-  device: string | null;
-  os: string | null;
-  browser: string | null;
-  language: string | null;
-  referrer: string | null;
-  is_bot: number;
-  is_suspicious: number;
-  fraud_score: number;
-  fraud_reasons_json: string;
-  redirected_to: string;
-  rule_applied: string | null;
-  response_time_ms: number | null;
-}
-
-function rowToClick(row: ClickRow): ClickEvent {
+function toClickEvent(doc: IClickEvent): ClickEventType {
   return {
-    id: row.id,
-    linkId: row.link_id,
-    timestamp: new Date(row.timestamp),
-    ip: row.ip,
-    ipHash: row.ip_hash,
-    userAgent: row.user_agent || '',
-    fingerprint: row.fingerprint || '',
-    country: row.country || undefined,
-    city: row.city || undefined,
-    device: row.device || 'unknown',
-    os: row.os || 'unknown',
-    browser: row.browser || 'unknown',
-    language: row.language || undefined,
-    referrer: row.referrer || undefined,
-    isBot: row.is_bot === 1,
-    isSuspicious: row.is_suspicious === 1,
-    fraudScore: row.fraud_score,
-    fraudReasons: JSON.parse(row.fraud_reasons_json),
-    redirectedTo: row.redirected_to,
-    ruleApplied: row.rule_applied || undefined,
-    responseTimeMs: row.response_time_ms || 0,
+    id: doc._id,
+    linkId: doc.linkId,
+    timestamp: doc.timestamp,
+    ip: doc.ip,
+    ipHash: doc.ipHash,
+    userAgent: doc.userAgent,
+    fingerprint: doc.fingerprint,
+    country: doc.country,
+    city: doc.city,
+    device: doc.device,
+    os: doc.os,
+    browser: doc.browser,
+    language: doc.language,
+    referrer: doc.referrer,
+    isBot: doc.isBot,
+    isSuspicious: doc.isSuspicious,
+    fraudScore: doc.fraudScore,
+    fraudReasons: doc.fraudReasons,
+    redirectedTo: doc.redirectedTo,
+    ruleApplied: doc.ruleApplied,
+    responseTimeMs: doc.responseTimeMs,
   };
 }
 
 export const clickRepository = {
-  create(data: Omit<ClickEvent, 'id' | 'timestamp'>): ClickEvent {
-    const id = nanoid();
-    
-    execute(
-      `INSERT INTO click_events (
-        id, link_id, ip, ip_hash, user_agent, fingerprint,
-        country, city, device, os, browser, language, referrer,
-        is_bot, is_suspicious, fraud_score, fraud_reasons_json,
-        redirected_to, rule_applied, response_time_ms
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        id,
-        data.linkId,
-        data.ip,
-        data.ipHash,
-        data.userAgent,
-        data.fingerprint,
-        data.country || null,
-        data.city || null,
-        data.device,
-        data.os,
-        data.browser,
-        data.language || null,
-        data.referrer || null,
-        data.isBot ? 1 : 0,
-        data.isSuspicious ? 1 : 0,
-        data.fraudScore,
-        JSON.stringify(data.fraudReasons),
-        data.redirectedTo,
-        data.ruleApplied || null,
-        data.responseTimeMs,
-      ]
-    );
-    
-    const row = queryOne<ClickRow>('SELECT * FROM click_events WHERE id = ?', [id]);
-    return rowToClick(row!);
+  async create(data: Omit<ClickEventType, 'id' | 'timestamp'>): Promise<ClickEventType> {
+    const doc = await ClickEvent.create({
+      _id: nanoid(),
+      ...data,
+      timestamp: new Date(),
+    });
+    return toClickEvent(doc);
   },
 
-  findByLink(linkId: string, limit = 100, offset = 0): ClickEvent[] {
-    const rows = queryAll<ClickRow>(
-      `SELECT * FROM click_events WHERE link_id = ? ORDER BY timestamp DESC LIMIT ? OFFSET ?`,
-      [linkId, limit, offset]
-    );
-    return rows.map(rowToClick);
+  async findByLink(linkId: string, limit = 20, offset = 0): Promise<ClickEventType[]> {
+    const docs = await ClickEvent.find({ linkId })
+      .sort({ timestamp: -1 })
+      .skip(offset)
+      .limit(limit);
+    return docs.map(toClickEvent);
   },
 
-  countByLink(linkId: string): number {
-    const result = queryOne<{ count: number }>('SELECT COUNT(*) as count FROM click_events WHERE link_id = ?', [linkId]);
-    return result?.count || 0;
+  async hasClickedBefore(linkId: string, ipHash: string): Promise<boolean> {
+    const count = await ClickEvent.countDocuments({ linkId, ipHash });
+    return count > 0;
   },
 
-  countUniqueByLink(linkId: string): number {
-    const result = queryOne<{ count: number }>('SELECT COUNT(DISTINCT ip_hash) as count FROM click_events WHERE link_id = ?', [linkId]);
-    return result?.count || 0;
+  async getClicksByCountry(linkId: string): Promise<Record<string, number>> {
+    const result = await ClickEvent.aggregate([
+      { $match: { linkId } },
+      { $group: { _id: '$country', count: { $sum: 1 } } },
+    ]);
+    return result.reduce((acc, { _id, count }) => {
+      if (_id) acc[_id] = count;
+      return acc;
+    }, {} as Record<string, number>);
   },
 
-  hasClickedBefore(linkId: string, ipHash: string): boolean {
-    const result = queryOne<{ count: number }>('SELECT COUNT(*) as count FROM click_events WHERE link_id = ? AND ip_hash = ?', [linkId, ipHash]);
-    return (result?.count || 0) > 0;
+  async getClicksByDevice(linkId: string): Promise<Record<string, number>> {
+    const result = await ClickEvent.aggregate([
+      { $match: { linkId } },
+      { $group: { _id: '$device', count: { $sum: 1 } } },
+    ]);
+    return result.reduce((acc, { _id, count }) => {
+      if (_id) acc[_id] = count;
+      return acc;
+    }, {} as Record<string, number>);
   },
 
-  getClicksByCountry(linkId: string): Record<string, number> {
-    const rows = queryAll<{ country: string; count: number }>(
-      `SELECT country, COUNT(*) as count FROM click_events WHERE link_id = ? AND country IS NOT NULL GROUP BY country ORDER BY count DESC`,
-      [linkId]
-    );
-    return Object.fromEntries(rows.map(r => [r.country, r.count]));
+  async getClicksByHour(linkId: string): Promise<Record<number, number>> {
+    const result = await ClickEvent.aggregate([
+      { $match: { linkId } },
+      { $group: { _id: { $hour: '$timestamp' }, count: { $sum: 1 } } },
+    ]);
+    return result.reduce((acc, { _id, count }) => {
+      acc[_id] = count;
+      return acc;
+    }, {} as Record<number, number>);
   },
 
-  getClicksByDevice(linkId: string): Record<string, number> {
-    const rows = queryAll<{ device: string; count: number }>(
-      `SELECT device, COUNT(*) as count FROM click_events WHERE link_id = ? GROUP BY device ORDER BY count DESC`,
-      [linkId]
-    );
-    return Object.fromEntries(rows.map(r => [r.device, r.count]));
+  async getBotClicks(linkId: string): Promise<number> {
+    return ClickEvent.countDocuments({ linkId, isBot: true });
   },
 
-  getClicksByHour(linkId: string): Record<number, number> {
-    const rows = queryAll<{ hour: number; count: number }>(
-      `SELECT strftime('%H', timestamp) as hour, COUNT(*) as count FROM click_events WHERE link_id = ? GROUP BY hour ORDER BY hour`,
-      [linkId]
-    );
-    return Object.fromEntries(rows.map(r => [parseInt(r.hour.toString()), r.count]));
+  async getSuspiciousClicks(linkId: string): Promise<number> {
+    return ClickEvent.countDocuments({ linkId, isSuspicious: true });
   },
 
-  getRecentClicks(linkId: string, minutes: number): number {
-    const result = queryOne<{ count: number }>(
-      `SELECT COUNT(*) as count FROM click_events WHERE link_id = ? AND timestamp > datetime('now', '-' || ? || ' minutes')`,
-      [linkId, minutes]
-    );
-    return result?.count || 0;
+  async getClicksForDate(linkIds: string[], date: string): Promise<number> {
+    const startOfDay = new Date(date);
+    const endOfDay = new Date(date);
+    endOfDay.setDate(endOfDay.getDate() + 1);
+
+    return ClickEvent.countDocuments({
+      linkId: { $in: linkIds },
+      timestamp: { $gte: startOfDay, $lt: endOfDay },
+    });
   },
 
-  getBotClicks(linkId: string): number {
-    const result = queryOne<{ count: number }>('SELECT COUNT(*) as count FROM click_events WHERE link_id = ? AND is_bot = 1', [linkId]);
-    return result?.count || 0;
-  },
-
-  getSuspiciousClicks(linkId: string): number {
-    const result = queryOne<{ count: number }>('SELECT COUNT(*) as count FROM click_events WHERE link_id = ? AND is_suspicious = 1', [linkId]);
-    return result?.count || 0;
+  async deleteByLink(linkId: string): Promise<void> {
+    await ClickEvent.deleteMany({ linkId });
   },
 };

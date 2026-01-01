@@ -1,182 +1,112 @@
 import { nanoid } from 'nanoid';
-import { queryOne, queryAll, execute } from '../db/index.js';
-import type { Link, RedirectRule, LinkScript, LinkLimits } from '../types/index.js';
+import { Link, ILink } from '../db/index.js';
+import type { Link as LinkType, RedirectRule, LinkLimits } from '../types/index.js';
 
-interface LinkRow {
-  id: string;
-  short_code: string;
-  original_url: string;
-  default_target_url: string;
-  owner_id: string;
-  state: string;
-  health_score: number;
-  trust_score: number;
-  rules_json: string;
-  scripts_json: string;
-  limits_json: string;
-  tags_json: string;
-  campaign: string | null;
-  ab_test_id: string | null;
-  total_clicks: number;
-  unique_clicks: number;
-  clicks_today: number;
-  last_click_at: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-function rowToLink(row: LinkRow): Link {
+function toLink(doc: ILink): LinkType {
   return {
-    id: row.id,
-    shortCode: row.short_code,
-    originalUrl: row.original_url,
-    defaultTargetUrl: row.default_target_url,
-    ownerId: row.owner_id,
-    state: row.state as Link['state'],
-    healthScore: row.health_score,
-    trustScore: row.trust_score,
-    rules: JSON.parse(row.rules_json) as RedirectRule[],
-    scripts: JSON.parse(row.scripts_json) as LinkScript[],
-    limits: JSON.parse(row.limits_json) as LinkLimits,
-    tags: JSON.parse(row.tags_json) as string[],
-    campaign: row.campaign || undefined,
-    abTestId: row.ab_test_id || undefined,
-    totalClicks: row.total_clicks,
-    uniqueClicks: row.unique_clicks,
-    clicksToday: row.clicks_today,
-    lastClickAt: row.last_click_at ? new Date(row.last_click_at) : undefined,
-    createdAt: new Date(row.created_at),
-    updatedAt: new Date(row.updated_at),
+    id: doc._id,
+    shortCode: doc.shortCode,
+    originalUrl: doc.originalUrl,
+    defaultTargetUrl: doc.defaultTargetUrl,
+    ownerId: doc.ownerId,
+    state: doc.state,
+    healthScore: doc.healthScore,
+    trustScore: doc.trustScore,
+    rules: doc.rules as RedirectRule[],
+    scripts: doc.scripts,
+    limits: doc.limits as LinkLimits,
+    tags: doc.tags,
+    campaign: doc.campaign,
+    abTestId: doc.abTestId,
+    totalClicks: doc.totalClicks,
+    uniqueClicks: doc.uniqueClicks,
+    clicksToday: doc.clicksToday,
+    lastClickAt: doc.lastClickAt,
+    createdAt: doc.createdAt,
+    updatedAt: doc.updatedAt,
   };
 }
 
 export const linkRepository = {
-  findByShortCode(shortCode: string): Link | undefined {
-    const row = queryOne<LinkRow>('SELECT * FROM links WHERE short_code = ?', [shortCode]);
-    return row ? rowToLink(row) : undefined;
+  async findById(id: string): Promise<LinkType | null> {
+    const doc = await Link.findById(id);
+    return doc ? toLink(doc) : null;
   },
 
-  findById(id: string): Link | undefined {
-    const row = queryOne<LinkRow>('SELECT * FROM links WHERE id = ?', [id]);
-    return row ? rowToLink(row) : undefined;
+  async findByShortCode(shortCode: string): Promise<LinkType | null> {
+    const doc = await Link.findOne({ shortCode });
+    return doc ? toLink(doc) : null;
   },
 
-  findByOwner(ownerId: string, limit = 100, offset = 0): Link[] {
-    const rows = queryAll<LinkRow>(
-      'SELECT * FROM links WHERE owner_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?',
-      [ownerId, limit, offset]
-    );
-    return rows.map(rowToLink);
+  async findByOwner(ownerId: string, limit = 20, offset = 0): Promise<LinkType[]> {
+    const docs = await Link.find({ ownerId })
+      .sort({ createdAt: -1 })
+      .skip(offset)
+      .limit(limit);
+    return docs.map(toLink);
   },
 
-  create(data: {
+  async create(data: {
     originalUrl: string;
-    defaultTargetUrl?: string;
     ownerId: string;
     customCode?: string;
     rules?: RedirectRule[];
-    scripts?: LinkScript[];
     limits?: LinkLimits;
     tags?: string[];
     campaign?: string;
-  }): Link {
+  }): Promise<LinkType> {
     const id = nanoid();
     const shortCode = data.customCode || nanoid(8);
-    
-    execute(
-      `INSERT INTO links (
-        id, short_code, original_url, default_target_url, owner_id,
-        rules_json, scripts_json, limits_json, tags_json, campaign
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        id,
-        shortCode,
-        data.originalUrl,
-        data.defaultTargetUrl || data.originalUrl,
-        data.ownerId,
-        JSON.stringify(data.rules || []),
-        JSON.stringify(data.scripts || []),
-        JSON.stringify(data.limits || {}),
-        JSON.stringify(data.tags || []),
-        data.campaign || null,
-      ]
-    );
-    
-    return this.findById(id)!;
+
+    const doc = await Link.create({
+      _id: id,
+      shortCode,
+      originalUrl: data.originalUrl,
+      defaultTargetUrl: data.originalUrl,
+      ownerId: data.ownerId,
+      rules: data.rules || [],
+      limits: data.limits || {},
+      tags: data.tags || [],
+      campaign: data.campaign,
+    });
+
+    return toLink(doc);
   },
 
-  update(id: string, data: Partial<{
+  async update(id: string, data: Partial<{
     defaultTargetUrl: string;
-    state: Link['state'];
+    state: string;
     rules: RedirectRule[];
-    scripts: LinkScript[];
     limits: LinkLimits;
     tags: string[];
     campaign: string;
-  }>): Link | undefined {
-    const updates: string[] = [];
-    const values: unknown[] = [];
-    
-    if (data.defaultTargetUrl !== undefined) {
-      updates.push('default_target_url = ?');
-      values.push(data.defaultTargetUrl);
-    }
-    if (data.state !== undefined) {
-      updates.push('state = ?');
-      values.push(data.state);
-    }
-    if (data.rules !== undefined) {
-      updates.push('rules_json = ?');
-      values.push(JSON.stringify(data.rules));
-    }
-    if (data.scripts !== undefined) {
-      updates.push('scripts_json = ?');
-      values.push(JSON.stringify(data.scripts));
-    }
-    if (data.limits !== undefined) {
-      updates.push('limits_json = ?');
-      values.push(JSON.stringify(data.limits));
-    }
-    if (data.tags !== undefined) {
-      updates.push('tags_json = ?');
-      values.push(JSON.stringify(data.tags));
-    }
-    if (data.campaign !== undefined) {
-      updates.push('campaign = ?');
-      values.push(data.campaign);
-    }
-    
-    if (updates.length === 0) return this.findById(id);
-    
-    updates.push('updated_at = CURRENT_TIMESTAMP');
-    values.push(id);
-    
-    execute(`UPDATE links SET ${updates.join(', ')} WHERE id = ?`, values);
-    return this.findById(id);
-  },
-
-  incrementClicks(id: string): void {
-    execute(
-      `UPDATE links SET 
-        total_clicks = total_clicks + 1,
-        clicks_today = clicks_today + 1,
-        last_click_at = CURRENT_TIMESTAMP,
-        updated_at = CURRENT_TIMESTAMP
-      WHERE id = ?`,
-      [id]
+  }>): Promise<LinkType | null> {
+    const doc = await Link.findByIdAndUpdate(
+      id,
+      { $set: data },
+      { new: true }
     );
+    return doc ? toLink(doc) : null;
   },
 
-  incrementUniqueClicks(id: string): void {
-    execute('UPDATE links SET unique_clicks = unique_clicks + 1 WHERE id = ?', [id]);
+  async delete(id: string): Promise<void> {
+    await Link.findByIdAndDelete(id);
   },
 
-  resetDailyClicks(): void {
-    execute('UPDATE links SET clicks_today = 0');
+  async incrementClicks(id: string): Promise<void> {
+    await Link.findByIdAndUpdate(id, {
+      $inc: { totalClicks: 1, clicksToday: 1 },
+      $set: { lastClickAt: new Date() },
+    });
   },
 
-  delete(id: string): boolean {
-    const result = execute('DELETE FROM links WHERE id = ?', [id]);
-    return result.changes > 0;
+  async incrementUniqueClicks(id: string): Promise<void> {
+    await Link.findByIdAndUpdate(id, {
+      $inc: { uniqueClicks: 1 },
+    });
+  },
+
+  async resetDailyClicks(): Promise<void> {
+    await Link.updateMany({}, { $set: { clicksToday: 0 } });
   },
 };

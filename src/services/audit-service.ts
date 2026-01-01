@@ -1,24 +1,45 @@
+import mongoose, { Schema } from 'mongoose';
 import { nanoid } from 'nanoid';
-import { execute, queryAll } from '../db/index.js';
 import type { AuditLog } from '../types/index.js';
 
-interface AuditLogRow {
-  id: string;
-  user_id: string;
-  api_key_id: string | null;
+interface IAuditLog {
+  _id: string;
+  userId?: string;
+  apiKeyId?: string;
   action: string;
   resource: string;
-  resource_id: string | null;
-  details_json: string;
-  ip: string | null;
-  user_agent: string | null;
-  timestamp: string;
+  resourceId?: string;
+  details: any;
+  ip?: string;
+  userAgent?: string;
+  timestamp: Date;
 }
+
+const auditLogSchema = new Schema<IAuditLog>({
+  _id: { type: String, required: true },
+  userId: { type: String, ref: 'User' },
+  apiKeyId: { type: String, ref: 'ApiKey' },
+  action: { type: String, required: true },
+  resource: { type: String, required: true },
+  resourceId: { type: String },
+  details: { type: Schema.Types.Mixed, default: {} },
+  ip: { type: String },
+  userAgent: { type: String },
+  timestamp: { type: Date, default: Date.now },
+}, {
+  timestamps: false,
+  _id: false,
+});
+
+auditLogSchema.index({ userId: 1 });
+auditLogSchema.index({ timestamp: -1 });
+
+const AuditLogModel = mongoose.model<IAuditLog>('AuditLog', auditLogSchema);
 
 export class AuditService {
   
-  log(data: {
-    userId: string;
+  async log(data: {
+    userId?: string;
     apiKeyId?: string;
     action: string;
     resource: string;
@@ -26,42 +47,48 @@ export class AuditService {
     details?: Record<string, unknown>;
     ip?: string;
     userAgent?: string;
-  }): void {
-    const id = nanoid();
-    
-    execute(
-      `INSERT INTO audit_logs (id, user_id, api_key_id, action, resource, resource_id, details_json, ip, user_agent) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [id, data.userId, data.apiKeyId || null, data.action, data.resource, data.resourceId || null, JSON.stringify(data.details || {}), data.ip || null, data.userAgent || null]
-    );
+  }): Promise<void> {
+    await AuditLogModel.create({
+      _id: nanoid(),
+      ...data,
+      details: data.details || {},
+    });
   }
   
-  getByUser(userId: string, limit = 100, offset = 0): AuditLog[] {
-    const rows = queryAll<AuditLogRow>(`SELECT * FROM audit_logs WHERE user_id = ? ORDER BY timestamp DESC LIMIT ? OFFSET ?`, [userId, limit, offset]);
-    return rows.map(this.rowToAuditLog);
+  async getByUser(userId: string, limit = 100, offset = 0): Promise<AuditLog[]> {
+    const docs = await AuditLogModel.find({ userId })
+      .sort({ timestamp: -1 })
+      .skip(offset)
+      .limit(limit);
+    return docs.map(this.toAuditLog);
   }
   
-  getByResource(resource: string, resourceId: string, limit = 100): AuditLog[] {
-    const rows = queryAll<AuditLogRow>(`SELECT * FROM audit_logs WHERE resource = ? AND resource_id = ? ORDER BY timestamp DESC LIMIT ?`, [resource, resourceId, limit]);
-    return rows.map(this.rowToAuditLog);
+  async getByResource(resource: string, resourceId: string, limit = 100): Promise<AuditLog[]> {
+    const docs = await AuditLogModel.find({ resource, resourceId })
+      .sort({ timestamp: -1 })
+      .limit(limit);
+    return docs.map(this.toAuditLog);
   }
   
-  getByApiKey(apiKeyId: string, limit = 100): AuditLog[] {
-    const rows = queryAll<AuditLogRow>(`SELECT * FROM audit_logs WHERE api_key_id = ? ORDER BY timestamp DESC LIMIT ?`, [apiKeyId, limit]);
-    return rows.map(this.rowToAuditLog);
+  async getByApiKey(apiKeyId: string, limit = 100): Promise<AuditLog[]> {
+    const docs = await AuditLogModel.find({ apiKeyId })
+      .sort({ timestamp: -1 })
+      .limit(limit);
+    return docs.map(this.toAuditLog);
   }
   
-  private rowToAuditLog(row: AuditLogRow): AuditLog {
+  private toAuditLog(doc: IAuditLog): AuditLog {
     return {
-      id: row.id,
-      userId: row.user_id,
-      apiKeyId: row.api_key_id || undefined,
-      action: row.action,
-      resource: row.resource,
-      resourceId: row.resource_id || '',
-      details: JSON.parse(row.details_json),
-      ip: row.ip || '',
-      userAgent: row.user_agent || '',
-      timestamp: new Date(row.timestamp),
+      id: doc._id,
+      userId: doc.userId,
+      apiKeyId: doc.apiKeyId,
+      action: doc.action,
+      resource: doc.resource,
+      resourceId: doc.resourceId,
+      details: doc.details,
+      ip: doc.ip,
+      userAgent: doc.userAgent,
+      timestamp: doc.timestamp,
     };
   }
 }
@@ -75,9 +102,7 @@ export const AuditActions = {
   LINK_PAUSED: 'link.paused',
   LINK_ACTIVATED: 'link.activated',
   API_KEY_CREATED: 'api_key.created',
-  API_KEY_REVOKED: 'api_key.revoked',
+  API_KEY_DELETED: 'api_key.deleted',
   WEBHOOK_CREATED: 'webhook.created',
   WEBHOOK_DELETED: 'webhook.deleted',
-  LOGIN: 'auth.login',
-  LOGOUT: 'auth.logout',
-} as const;
+};

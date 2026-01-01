@@ -155,14 +155,14 @@ export interface User {
 
 export interface AuditLog {
   id: string;
-  userId: string;
+  userId?: string;
   apiKeyId?: string;
   action: string;
   resource: string;
-  resourceId: string;
+  resourceId?: string;
   details: Record<string, unknown>;
-  ip: string;
-  userAgent: string;
+  ip?: string;
+  userAgent?: string;
   timestamp: Date;
 }
 

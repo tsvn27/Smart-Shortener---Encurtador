@@ -4,8 +4,14 @@ Encurtador de links inteligente com analytics avançado, proteção contra bots,
 
 ## Stack
 
-**Backend:** Node.js, Express, TypeScript, SQLite, bcryptjs, JWT  
+**Backend:** Node.js, Express, TypeScript, MongoDB, Mongoose, JWT  
 **Frontend:** Next.js 16, React 19, TypeScript, Tailwind CSS, Recharts, Lucide Icons
+
+## Pré-requisitos
+
+- Node.js 18+
+- MongoDB (local ou Atlas)
+- pnpm (para o frontend)
 
 ## Instalação
 
@@ -15,6 +21,24 @@ npm install
 
 # Frontend
 cd frontend && pnpm install
+```
+
+## Configuração
+
+1. Copie os arquivos de exemplo:
+```bash
+cp .env.example .env
+cp frontend/.env.example frontend/.env.local
+```
+
+2. Configure o MongoDB no `.env`:
+```env
+MONGODB_URI=mongodb://localhost:27017/shortener
+```
+
+3. (Opcional) Rode o seed para criar usuário demo:
+```bash
+npm run seed
 ```
 
 ## Executar
@@ -168,7 +192,7 @@ NEXT_PUBLIC_SHORT_DOMAIN=localhost:3002
 ├── src/                    # Backend
 │   ├── api/               # Rotas e middlewares
 │   ├── core/              # Lógica de negócio
-│   ├── db/                # Banco de dados
+│   ├── db/                # Models e conexão MongoDB
 │   ├── handlers/          # Handlers de requisição
 │   ├── lib/               # Utilitários
 │   ├── repositories/      # Acesso a dados
@@ -179,7 +203,6 @@ NEXT_PUBLIC_SHORT_DOMAIN=localhost:3002
 │   ├── components/        # Componentes React
 │   ├── lib/               # Utilitários e API client
 │   └── public/            # Assets estáticos
-├── data/                  # Banco SQLite
 └── logs/                  # Arquivos de log
 ```
 

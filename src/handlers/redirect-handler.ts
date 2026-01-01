@@ -12,7 +12,7 @@ export async function handleRedirect(req: Request, res: Response) {
   const startTime = Date.now();
   const shortCode = req.params.code;
   
-  const link = linkRepository.findByShortCode(shortCode);
+  const link = await linkRepository.findByShortCode(shortCode);
   
   if (!link) {
     return res.status(404).redirect('/not-found');
@@ -39,11 +39,11 @@ export async function handleRedirect(req: Request, res: Response) {
   }
   
   const ipHash = createHash('sha256').update(ip).digest('hex').substring(0, 16);
-  const isNewVisitor = !clickRepository.hasClickedBefore(link.id, ipHash);
+  const isNewVisitor = !(await clickRepository.hasClickedBefore(link.id, ipHash));
   
   const responseTime = Date.now() - startTime;
   
-  clickRepository.create({
+  await clickRepository.create({
     linkId: link.id,
     ip,
     ipHash,
@@ -64,9 +64,9 @@ export async function handleRedirect(req: Request, res: Response) {
     responseTimeMs: responseTime,
   });
   
-  linkRepository.incrementClicks(link.id);
+  await linkRepository.incrementClicks(link.id);
   if (isNewVisitor) {
-    linkRepository.incrementUniqueClicks(link.id);
+    await linkRepository.incrementUniqueClicks(link.id);
   }
   
   webhookService.trigger(link.ownerId, 'link.clicked', {
@@ -82,9 +82,9 @@ export async function handleRedirect(req: Request, res: Response) {
   res.redirect(302, targetUrl);
 }
 
-export function handlePreview(req: Request, res: Response) {
+export async function handlePreview(req: Request, res: Response) {
   const shortCode = req.params.code;
-  const link = linkRepository.findByShortCode(shortCode);
+  const link = await linkRepository.findByShortCode(shortCode);
   
   if (!link) {
     return res.status(404).json({ error: 'Link não encontrado' });
