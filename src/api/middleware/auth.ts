@@ -38,6 +38,7 @@ interface UserRow {
   email: string;
   password_hash: string;
   name: string;
+  avatar: string | null;
   plan: string;
   max_links: number;
   max_api_keys: number;
@@ -104,7 +105,7 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
   const lockout = checkLockout(ip);
   if (lockout.locked) {
     return res.status(429).json({ 
-      error: 'Too many failed attempts. Please try again later.',
+      error: 'Muitas tentativas falhas. Tente novamente mais tarde.',
       retryAfter: Math.ceil((lockout.remainingTime || 0) / 1000)
     });
   }
@@ -133,7 +134,7 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
     } catch (err) {
       if (err instanceof jwt.TokenExpiredError) {
         clearAuthCookie(res);
-        return res.status(401).json({ error: 'Session expired' });
+        return res.status(401).json({ error: 'Sessão expirada' });
       }
       recordFailedAttempt(ip);
       logger.warn(`Invalid token from ${ip}`);
@@ -146,7 +147,7 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
     const sanitizedKey = sanitizeInput(apiKey);
     if (sanitizedKey.length < 32 || sanitizedKey.length > 128) {
       recordSuspiciousActivity(ip);
-      return res.status(401).json({ error: 'Invalid API key format' });
+      return res.status(401).json({ error: 'Formato de chave API inválido' });
     }
     
     const keyHash = createHash('sha256').update(sanitizedKey).digest('hex');
@@ -154,7 +155,7 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
     
     if (keyRow) {
       if (keyRow.expires_at && new Date(keyRow.expires_at) < new Date()) {
-        return res.status(401).json({ error: 'API key expired' });
+        return res.status(401).json({ error: 'Chave API expirada' });
       }
       
       execute('UPDATE api_keys SET last_used_at = CURRENT_TIMESTAMP WHERE id = ?', [keyRow.id]);
@@ -175,7 +176,7 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
   }
   
   recordFailedAttempt(ip);
-  return res.status(401).json({ error: 'Authentication required' });
+  return res.status(401).json({ error: 'Autenticação necessária' });
 }
 
 export function requirePermission(permission: ApiPermission) {
@@ -186,7 +187,7 @@ export function requirePermission(permission: ApiPermission) {
     
     if (!permissions.includes(permission)) {
       return res.status(403).json({ 
-        error: 'Insufficient permissions',
+        error: 'Permissões insuficientes',
         required: permission,
       });
     }
@@ -212,19 +213,19 @@ export async function verifyPassword(password: string, hash: string): Promise<bo
 
 export function validatePassword(password: string): { valid: boolean; message?: string } {
   if (password.length < 8) {
-    return { valid: false, message: 'Password must be at least 8 characters' };
+    return { valid: false, message: 'A senha deve ter pelo menos 8 caracteres' };
   }
   if (password.length > 128) {
-    return { valid: false, message: 'Password too long' };
+    return { valid: false, message: 'Senha muito longa' };
   }
   if (!/[a-z]/.test(password)) {
-    return { valid: false, message: 'Password must contain a lowercase letter' };
+    return { valid: false, message: 'A senha deve conter uma letra minúscula' };
   }
   if (!/[A-Z]/.test(password)) {
-    return { valid: false, message: 'Password must contain an uppercase letter' };
+    return { valid: false, message: 'A senha deve conter uma letra maiúscula' };
   }
   if (!/[0-9]/.test(password)) {
-    return { valid: false, message: 'Password must contain a number' };
+    return { valid: false, message: 'A senha deve conter um número' };
   }
   return { valid: true };
 }
@@ -240,6 +241,7 @@ function rowToUser(row: UserRow): User {
     email: row.email,
     passwordHash: row.password_hash,
     name: row.name,
+    avatar: row.avatar || undefined,
     createdAt: new Date(row.created_at),
     updatedAt: new Date(row.updated_at),
   };

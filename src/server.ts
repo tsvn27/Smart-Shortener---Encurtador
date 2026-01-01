@@ -67,8 +67,8 @@ app.use(cors({
   maxAge: 86400,
 }));
 
-app.use(express.json({ limit: '10kb' }));
-app.use(express.urlencoded({ extended: false, limit: '10kb' }));
+app.use(express.json({ limit: '1mb' }));
+app.use(express.urlencoded({ extended: false, limit: '1mb' }));
 
 app.set('trust proxy', 1);
 
@@ -128,14 +128,14 @@ app.use((err: Error, req: express.Request, res: express.Response, next: express.
   logger.error(`Error: ${err.message}`, { stack: err.stack, path: req.path, ip });
   
   if (err.message === 'Not allowed by CORS') {
-    return res.status(403).json({ error: 'Origin not allowed' });
+    return res.status(403).json({ error: 'Origem não permitida' });
   }
   
-  res.status(500).json({ error: 'Internal server error' });
+  res.status(500).json({ error: 'Erro interno do servidor' });
 });
 
 app.use((_, res) => {
-  res.status(404).json({ error: 'Not found' });
+  res.status(404).json({ error: 'Não encontrado' });
 });
 
 const server = app.listen(PORT, () => {

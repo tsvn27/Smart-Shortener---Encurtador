@@ -127,6 +127,19 @@ class ApiClient {
     return this.request<ApiResponse<User>>("/auth/me")
   }
 
+  async uploadAvatar(avatar: string) {
+    return this.request<ApiResponse<{ avatar: string }>>("/auth/avatar", {
+      method: "POST",
+      body: JSON.stringify({ avatar }),
+    })
+  }
+
+  async deleteAvatar() {
+    return this.request<ApiResponse<{ message: string }>>("/auth/avatar", {
+      method: "DELETE",
+    })
+  }
+
   async forgotPassword(email: string) {
     return this.request<ApiResponse<{ message: string }>>("/auth/forgot-password", {
       method: "POST",
@@ -279,6 +292,7 @@ export interface User {
   id: string
   email: string
   name: string
+  avatar?: string
   createdAt: string
   updatedAt: string
 }

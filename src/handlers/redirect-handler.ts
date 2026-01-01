@@ -6,6 +6,7 @@ import { redirectEngine } from '../core/redirect-engine.js';
 import { fraudDetector } from '../core/fraud-detector.js';
 import { scriptEngine } from '../core/script-engine.js';
 import { parseContext, getClientIp, getHeaders } from '../core/context-parser.js';
+import { webhookService } from '../services/webhook-service.js';
 
 export async function handleRedirect(req: Request, res: Response) {
   const startTime = Date.now();
@@ -68,6 +69,16 @@ export async function handleRedirect(req: Request, res: Response) {
     linkRepository.incrementUniqueClicks(link.id);
   }
   
+  webhookService.trigger(link.ownerId, 'link.clicked', {
+    linkId: link.id,
+    shortCode: link.shortCode,
+    targetUrl,
+    country: context.country,
+    device: context.device,
+    isBot: fraudAnalysis.isBot,
+    timestamp: new Date().toISOString(),
+  }).catch(() => {});
+  
   res.redirect(302, targetUrl);
 }
 
@@ -76,7 +87,7 @@ export function handlePreview(req: Request, res: Response) {
   const link = linkRepository.findByShortCode(shortCode);
   
   if (!link) {
-    return res.status(404).json({ error: 'Link not found' });
+    return res.status(404).json({ error: 'Link não encontrado' });
   }
   
   res.json({

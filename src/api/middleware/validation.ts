@@ -6,7 +6,7 @@ export function validateBody<T extends ZodSchema>(schema: T) {
     const result = schema.safeParse(req.body);
     
     if (!result.success) {
-      return res.status(400).json({ error: 'Validation failed', details: result.error.flatten() });
+      return res.status(400).json({ error: 'Validação falhou', details: result.error.flatten() });
     }
     
     req.body = result.data;
@@ -19,7 +19,7 @@ export function validateQuery<T extends ZodSchema>(schema: T) {
     const result = schema.safeParse(req.query);
     
     if (!result.success) {
-      return res.status(400).json({ error: 'Invalid query parameters', details: result.error.flatten() });
+      return res.status(400).json({ error: 'Parâmetros de consulta inválidos', details: result.error.flatten() });
     }
     
     req.query = result.data;
@@ -32,7 +32,7 @@ export function validateParams<T extends ZodSchema>(schema: T) {
     const result = schema.safeParse(req.params);
     
     if (!result.success) {
-      return res.status(400).json({ error: 'Invalid URL parameters', details: result.error.flatten() });
+      return res.status(400).json({ error: 'Parâmetros de URL inválidos', details: result.error.flatten() });
     }
     
     req.params = result.data;

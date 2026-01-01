@@ -1,10 +1,10 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { useRouter } from "next/navigation"
 import { useAuth } from "@/lib/auth"
 import { api, type ApiKeyItem, type WebhookItem } from "@/lib/api"
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -31,6 +31,7 @@ import {
   Send,
   Zap,
   ChevronRight,
+  X,
 } from "lucide-react"
 
 type Tab = "account" | "security" | "notifications" | "api" | "webhooks"
@@ -39,8 +40,10 @@ export function SettingsContent() {
   const { user, logout, refreshUser } = useAuth()
   const router = useRouter()
   const { success, error: showError } = useToast()
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [activeTab, setActiveTab] = useState<Tab>("account")
   const [isLoading, setIsLoading] = useState(false)
+  const [uploadingAvatar, setUploadingAvatar] = useState(false)
   const [name, setName] = useState("")
   const [apiKeys, setApiKeys] = useState<ApiKeyItem[]>([])
   const [webhooks, setWebhooks] = useState<WebhookItem[]>([])
@@ -122,6 +125,59 @@ export function SettingsContent() {
       showError("Erro ao atualizar perfil")
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  const handleAvatarClick = () => {
+    fileInputRef.current?.click()
+  }
+
+  const handleAvatarChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    if (!file.type.startsWith('image/')) {
+      showError("Selecione uma imagem válida")
+      return
+    }
+
+    if (file.size > 500000) {
+      showError("Imagem muito grande (máx 500KB)")
+      return
+    }
+
+    setUploadingAvatar(true)
+    try {
+      const reader = new FileReader()
+      reader.onload = async (event) => {
+        const base64 = event.target?.result as string
+        try {
+          await api.uploadAvatar(base64)
+          await refreshUser?.()
+          success("Foto atualizada!")
+        } catch (err) {
+          showError("Erro ao atualizar foto")
+        } finally {
+          setUploadingAvatar(false)
+        }
+      }
+      reader.readAsDataURL(file)
+    } catch (err) {
+      showError("Erro ao processar imagem")
+      setUploadingAvatar(false)
+    }
+  }
+
+  const handleRemoveAvatar = async () => {
+    setUploadingAvatar(true)
+    try {
+      await api.deleteAvatar()
+      await refreshUser?.()
+      success("Foto removida!")
+    } catch (err) {
+      showError("Erro ao remover foto")
+    } finally {
+      setUploadingAvatar(false)
     }
   }
 
@@ -266,17 +322,45 @@ export function SettingsContent() {
                 <div className="flex items-center gap-5">
                   <div className="relative">
                     <Avatar className="w-20 h-20 ring-2 ring-white/[0.08]">
+                      {user?.avatar ? (
+                        <AvatarImage src={user.avatar} alt={user.name} />
+                      ) : null}
                       <AvatarFallback className="bg-primary/15 text-primary text-xl font-semibold">
                         {user?.name?.split(" ").map((n) => n[0]).join("") || "U"}
                       </AvatarFallback>
                     </Avatar>
-                    <button className="absolute -bottom-1 -right-1 p-1.5 rounded-full bg-white/[0.08] border border-white/[0.1] hover:bg-white/[0.12] transition-colors">
-                      <Camera className="w-3.5 h-3.5 text-foreground" />
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      onChange={handleAvatarChange}
+                      className="hidden"
+                    />
+                    <button 
+                      onClick={handleAvatarClick}
+                      disabled={uploadingAvatar}
+                      className="absolute -bottom-1 -right-1 p-1.5 rounded-full bg-white/[0.08] border border-white/[0.1] hover:bg-white/[0.12] transition-colors disabled:opacity-50"
+                    >
+                      {uploadingAvatar ? (
+                        <Loader2 className="w-3.5 h-3.5 text-foreground animate-spin" />
+                      ) : (
+                        <Camera className="w-3.5 h-3.5 text-foreground" />
+                      )}
                     </button>
+                    {user?.avatar && (
+                      <button 
+                        onClick={handleRemoveAvatar}
+                        disabled={uploadingAvatar}
+                        className="absolute -top-1 -right-1 p-1 rounded-full bg-rose-500/20 border border-rose-500/30 hover:bg-rose-500/30 transition-colors disabled:opacity-50"
+                      >
+                        <X className="w-3 h-3 text-rose-400" />
+                      </button>
+                    )}
                   </div>
                   <div className="flex-1">
                     <h3 className="text-lg font-medium text-foreground">{user?.name}</h3>
                     <p className="text-sm text-muted-foreground">{user?.email}</p>
+                    <p className="text-xs text-muted-foreground mt-1">Clique na câmera para alterar a foto</p>
                   </div>
                 </div>
               </div>

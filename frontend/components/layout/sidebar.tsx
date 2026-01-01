@@ -118,6 +118,9 @@ export function Sidebar() {
         <div className="p-4 border-t border-white/[0.06]">
           <div className="flex items-center gap-3 p-2 rounded-xl hover:bg-white/[0.04] transition-colors cursor-pointer">
             <Avatar className="w-9 h-9 ring-2 ring-white/[0.08]">
+              {user?.avatar ? (
+                <AvatarImage src={user.avatar} alt={userName} />
+              ) : null}
               <AvatarFallback className="bg-primary/20 text-primary text-sm font-medium">
                 {userInitials}
               </AvatarFallback>

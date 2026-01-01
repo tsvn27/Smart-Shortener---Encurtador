@@ -60,9 +60,27 @@ export function DashboardContent() {
     )
   }
 
-  const firstName = user?.name?.split(" ")[0] || "Usuário"
-  const hour = new Date().getHours()
-  const greeting = hour < 12 ? "Bom dia" : hour < 18 ? "Boa tarde" : "Boa noite"
+  const getGreeting = () => {
+    const now = new Date()
+    const brasiliaOffset = -3
+    const utc = now.getTime() + (now.getTimezoneOffset() * 60000)
+    const brasiliaTime = new Date(utc + (3600000 * brasiliaOffset))
+    const hour = brasiliaTime.getHours()
+    
+    if (hour >= 6 && hour < 13) return "Bom dia"
+    if (hour >= 13 && hour < 18.5) return "Boa tarde"
+    return "Boa noite"
+  }
+
+  const getDisplayName = () => {
+    if (!user?.name) return "Usuário"
+    const parts = user.name.trim().split(" ")
+    if (parts.length <= 2) return user.name
+    return `${parts[0]} ${parts[1]}`
+  }
+
+  const greeting = getGreeting()
+  const displayName = getDisplayName()
 
   const totalClicks = stats?.totalClicks || 0
   const clicksToday = stats?.clicksToday || 0
@@ -77,7 +95,7 @@ export function DashboardContent() {
       <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-4 animate-fade-in">
         <div>
           <p className="text-sm text-muted-foreground mb-1">{greeting},</p>
-          <h1 className="text-3xl font-semibold text-gradient">{firstName}</h1>
+          <h1 className="text-3xl font-semibold text-gradient">{displayName}</h1>
         </div>
         <Link href="/links/new">
           <Button className="gap-2 bg-primary hover:bg-primary/90 h-10">

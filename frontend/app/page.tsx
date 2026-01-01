@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { Logo } from "@/components/ui/logo"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -19,12 +20,20 @@ function formatNumber(num: number): string {
 }
 
 export default function Home() {
+  const router = useRouter()
   const [mounted, setMounted] = useState(false)
   const [scrollY, setScrollY] = useState(0)
   const [stats, setStats] = useState<PublicStats | null>(null)
 
   useEffect(() => {
     setMounted(true)
+    
+    const token = localStorage.getItem("auth_token")
+    if (token) {
+      router.push("/dashboard")
+      return
+    }
+    
     const handleScroll = () => setScrollY(window.scrollY)
     window.addEventListener("scroll", handleScroll, { passive: true })
     
@@ -33,7 +42,7 @@ export default function Home() {
       .catch(() => {})
     
     return () => window.removeEventListener("scroll", handleScroll)
-  }, [])
+  }, [router])
 
   const rotateX = Math.max(0, 12 - scrollY * 0.04)
   const scale = Math.min(1, 0.9 + scrollY * 0.0003)
@@ -236,10 +245,43 @@ export default function Home() {
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-white/[0.04] py-8 px-6">
-        <div className="max-w-5xl mx-auto flex items-center justify-between">
-          <Logo size="sm" />
-          <span className="text-xs text-muted-foreground">© 2025 SmartShortener</span>
+      <footer className="border-t border-white/[0.04] pt-16 pb-8 px-6">
+        <div className="max-w-5xl mx-auto">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-8 mb-12">
+            {/* Brand */}
+            <div className="col-span-2 md:col-span-1">
+              <Logo size="sm" />
+              <p className="text-sm text-muted-foreground mt-3 max-w-xs">
+                Encurtador de links inteligente com analytics completo e proteção contra bots.
+              </p>
+            </div>
+
+            {/* Produto */}
+            <div>
+              <h4 className="text-sm font-medium text-foreground mb-4">Produto</h4>
+              <ul className="space-y-2.5">
+                <li><Link href="/login" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Dashboard</Link></li>
+                <li><Link href="/login" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Meus Links</Link></li>
+                <li><Link href="/login" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Analytics</Link></li>
+                <li><Link href="/login" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Configurações</Link></li>
+              </ul>
+            </div>
+
+            {/* Conta */}
+            <div>
+              <h4 className="text-sm font-medium text-foreground mb-4">Conta</h4>
+              <ul className="space-y-2.5">
+                <li><Link href="/login" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Entrar</Link></li>
+                <li><Link href="/login" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Criar conta</Link></li>
+                <li><Link href="/forgot-password" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Esqueci a senha</Link></li>
+              </ul>
+            </div>
+          </div>
+
+          {/* Bottom */}
+          <div className="pt-8 border-t border-white/[0.04] flex flex-col sm:flex-row items-center justify-between gap-4">
+            <span className="text-xs text-muted-foreground">© {new Date().getFullYear()} SmartShortener. Todos os direitos reservados.</span>
+          </div>
         </div>
       </footer>
     </div>

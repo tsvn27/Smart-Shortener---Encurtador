@@ -20,6 +20,7 @@ interface UserRow {
   email: string;
   password_hash: string;
   name: string;
+  avatar: string | null;
   plan: string;
   max_links: number;
   max_api_keys: number;
@@ -75,7 +76,7 @@ router.post('/auth/register', authLimiter, validateBody(registerSchema), async (
   const sanitizedName = sanitizeInput(name.trim());
   
   if (!validateEmail(sanitizedEmail)) {
-    return res.status(400).json({ error: 'Invalid email format' });
+    return res.status(400).json({ error: 'Formato de email inválido' });
   }
   
   const passwordValidation = validatePassword(password);
@@ -85,7 +86,7 @@ router.post('/auth/register', authLimiter, validateBody(registerSchema), async (
   
   const existing = queryOne<UserRow>('SELECT id FROM users WHERE email = ?', [sanitizedEmail]);
   if (existing) {
-    return res.status(409).json({ error: 'Email already registered' });
+    return res.status(409).json({ error: 'Email já cadastrado' });
   }
   
   const id = nanoid();
@@ -109,6 +110,7 @@ router.post('/auth/register', authLimiter, validateBody(registerSchema), async (
         id: user.id,
         email: user.email,
         name: user.name,
+        avatar: user.avatar || undefined,
         createdAt: user.created_at,
         updatedAt: user.updated_at,
       },
@@ -125,14 +127,14 @@ router.post('/auth/login', authLimiter, validateBody(loginSchema), async (req, r
   const user = queryOne<UserRow>('SELECT * FROM users WHERE email = ?', [sanitizedEmail]);
   if (!user) {
     logger.warn(`Failed login attempt for non-existent email`, { ip });
-    return res.status(401).json({ error: 'Invalid credentials' });
+    return res.status(401).json({ error: 'Email ou senha incorretos' });
   }
   
   const valid = await verifyPassword(password, user.password_hash);
   if (!valid) {
     logger.warn(`Failed login attempt for ${sanitizedEmail}`, { ip });
     recordSuspiciousActivity(ip);
-    return res.status(401).json({ error: 'Invalid credentials' });
+    return res.status(401).json({ error: 'Email ou senha incorretos' });
   }
   
   const token = generateToken(user.id);
@@ -146,6 +148,7 @@ router.post('/auth/login', authLimiter, validateBody(loginSchema), async (req, r
         id: user.id,
         email: user.email,
         name: user.name,
+        avatar: user.avatar || undefined,
         createdAt: user.created_at,
         updatedAt: user.updated_at,
       },
@@ -155,7 +158,7 @@ router.post('/auth/login', authLimiter, validateBody(loginSchema), async (req, r
 
 router.post('/auth/logout', requireAuth, (req, res) => {
   clearAuthCookie(res);
-  res.json({ data: { message: 'Logged out successfully' } });
+  res.json({ data: { message: 'Logout realizado com sucesso' } });
 });
 
 const forgotPasswordSchema = z.object({
@@ -169,7 +172,7 @@ router.post('/auth/forgot-password', passwordResetLimiter, validateBody(forgotPa
   const sanitizedEmail = sanitizeInput(email.toLowerCase().trim());
   const user = queryOne<UserRow>('SELECT * FROM users WHERE email = ?', [sanitizedEmail]);
   
-  res.json({ data: { message: 'If the email exists, a reset link will be sent' } });
+  res.json({ data: { message: 'Se o email existir, um link de recuperação será enviado' } });
   
   if (!user) {
     logger.info(`Password reset requested for non-existent email`, { ip });
@@ -220,7 +223,7 @@ router.post('/auth/reset-password', passwordResetLimiter, validateBody(resetPass
   if (!reset) {
     logger.warn(`Invalid password reset attempt`, { ip });
     recordSuspiciousActivity(ip);
-    return res.status(400).json({ error: 'Invalid or expired token' });
+    return res.status(400).json({ error: 'Token inválido ou expirado' });
   }
   
   const passwordHash = await hashPassword(password);
@@ -232,7 +235,7 @@ router.post('/auth/reset-password', passwordResetLimiter, validateBody(resetPass
   
   logger.info(`Password reset completed for user ${reset.user_id}`, { ip });
   
-  res.json({ data: { message: 'Password reset successfully' } });
+  res.json({ data: { message: 'Senha redefinida com sucesso' } });
 });
 
 router.get('/auth/me', requireAuth, (req, res) => {
@@ -242,10 +245,39 @@ router.get('/auth/me', requireAuth, (req, res) => {
       id: user.id,
       email: user.email,
       name: user.name,
+      avatar: user.avatar,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
     },
   });
+});
+
+const avatarSchema = z.object({
+  avatar: z.string().max(500000),
+});
+
+router.post('/auth/avatar', requireAuth, validateBody(avatarSchema), (req, res) => {
+  const { avatar } = req.body;
+  const userId = req.user!.id;
+  
+  if (!avatar.startsWith('data:image/')) {
+    return res.status(400).json({ error: 'Formato de imagem inválido' });
+  }
+  
+  const sizeInBytes = Buffer.byteLength(avatar, 'utf8');
+  if (sizeInBytes > 500000) {
+    return res.status(400).json({ error: 'Imagem muito grande (máx 500KB)' });
+  }
+  
+  execute('UPDATE users SET avatar = ?, updated_at = ? WHERE id = ?', [avatar, new Date().toISOString(), userId]);
+  
+  res.json({ data: { avatar } });
+});
+
+router.delete('/auth/avatar', requireAuth, (req, res) => {
+  const userId = req.user!.id;
+  execute('UPDATE users SET avatar = NULL, updated_at = ? WHERE id = ?', [new Date().toISOString(), userId]);
+  res.json({ data: { message: 'Avatar removido' } });
 });
 
 const changePasswordSchema = z.object({
@@ -265,14 +297,14 @@ router.post('/auth/change-password', requireAuth, authLimiter, validateBody(chan
   
   const user = queryOne<UserRow>('SELECT * FROM users WHERE id = ?', [userId]);
   if (!user) {
-    return res.status(404).json({ error: 'User not found' });
+    return res.status(404).json({ error: 'Usuário não encontrado' });
   }
   
   const valid = await verifyPassword(currentPassword, user.password_hash);
   if (!valid) {
     logger.warn(`Failed password change attempt for user ${userId}`, { ip });
     recordSuspiciousActivity(ip);
-    return res.status(401).json({ error: 'Current password is incorrect' });
+    return res.status(401).json({ error: 'Senha atual incorreta' });
   }
   
   const newPasswordHash = await hashPassword(newPassword);
@@ -281,7 +313,7 @@ router.post('/auth/change-password', requireAuth, authLimiter, validateBody(chan
   clearAuthCookie(res);
   logger.info(`Password changed for user ${userId}`, { ip });
   
-  res.json({ data: { message: 'Password changed successfully' } });
+  res.json({ data: { message: 'Senha alterada com sucesso' } });
 });
 
 const updateProfileSchema = z.object({
@@ -462,7 +494,7 @@ router.post('/links',
     if (data.customCode) {
       const existing = linkRepository.findByShortCode(data.customCode);
       if (existing) {
-        return res.status(409).json({ error: 'Short code already taken' });
+        return res.status(409).json({ error: 'Código já está em uso' });
       }
     }
     
@@ -486,8 +518,8 @@ router.get('/links/:id',
   (req, res) => {
     const link = linkRepository.findById(req.params.id);
     
-    if (!link) return res.status(404).json({ error: 'Link not found' });
-    if (link.ownerId !== req.user!.id) return res.status(403).json({ error: 'Access denied' });
+    if (!link) return res.status(404).json({ error: 'Link não encontrado' });
+    if (link.ownerId !== req.user!.id) return res.status(403).json({ error: 'Acesso negado' });
     
     res.json({ data: link });
   }
@@ -500,8 +532,8 @@ router.patch('/links/:id',
   (req, res) => {
     const link = linkRepository.findById(req.params.id);
     
-    if (!link) return res.status(404).json({ error: 'Link not found' });
-    if (link.ownerId !== req.user!.id) return res.status(403).json({ error: 'Access denied' });
+    if (!link) return res.status(404).json({ error: 'Link não encontrado' });
+    if (link.ownerId !== req.user!.id) return res.status(403).json({ error: 'Acesso negado' });
     
     const data = req.body as z.infer<typeof updateLinkSchema>;
     const updated = linkRepository.update(req.params.id, {
@@ -522,8 +554,8 @@ router.delete('/links/:id',
   (req, res) => {
     const link = linkRepository.findById(req.params.id);
     
-    if (!link) return res.status(404).json({ error: 'Link not found' });
-    if (link.ownerId !== req.user!.id) return res.status(403).json({ error: 'Access denied' });
+    if (!link) return res.status(404).json({ error: 'Link não encontrado' });
+    if (link.ownerId !== req.user!.id) return res.status(403).json({ error: 'Acesso negado' });
     
     linkRepository.delete(req.params.id);
     res.status(204).send();
@@ -537,7 +569,7 @@ router.post('/links/:id/pause',
     const link = linkRepository.findById(req.params.id);
     
     if (!link || link.ownerId !== req.user!.id) {
-      return res.status(404).json({ error: 'Link not found' });
+      return res.status(404).json({ error: 'Link não encontrado' });
     }
     
     const updated = linkRepository.update(req.params.id, { state: 'paused' });
@@ -552,7 +584,7 @@ router.post('/links/:id/activate',
     const link = linkRepository.findById(req.params.id);
     
     if (!link || link.ownerId !== req.user!.id) {
-      return res.status(404).json({ error: 'Link not found' });
+      return res.status(404).json({ error: 'Link não encontrado' });
     }
     
     const updated = linkRepository.update(req.params.id, { state: 'active' });
@@ -567,7 +599,7 @@ router.get('/links/:id/analytics',
     const link = linkRepository.findById(req.params.id);
     
     if (!link || link.ownerId !== req.user!.id) {
-      return res.status(404).json({ error: 'Link not found' });
+      return res.status(404).json({ error: 'Link não encontrado' });
     }
     
     const analytics = {
@@ -593,7 +625,7 @@ router.get('/links/:id/clicks',
     const link = linkRepository.findById(req.params.id);
     
     if (!link || link.ownerId !== req.user!.id) {
-      return res.status(404).json({ error: 'Link not found' });
+      return res.status(404).json({ error: 'Link não encontrado' });
     }
     
     const { limit, offset } = req.query as unknown as { limit: number; offset: number };
@@ -610,7 +642,7 @@ router.get('/links/:id/export',
     const link = linkRepository.findById(req.params.id);
     
     if (!link || link.ownerId !== req.user!.id) {
-      return res.status(404).json({ error: 'Link not found' });
+      return res.status(404).json({ error: 'Link não encontrado' });
     }
     
     const clicks = clickRepository.findByLink(link.id, 10000, 0);
@@ -669,7 +701,7 @@ router.post('/api-keys', requireAuth, apiKeyLimiter, validateBody(createApiKeySc
   );
   
   if ((existingCount?.count || 0) >= 10) {
-    return res.status(400).json({ error: 'Maximum API keys limit reached (10)' });
+    return res.status(400).json({ error: 'Limite máximo de chaves API atingido (10)' });
   }
   
   const id = nanoid();
@@ -701,7 +733,7 @@ router.delete('/api-keys/:id', requireAuth, (req, res) => {
   );
   
   if (!key) {
-    return res.status(404).json({ error: 'API key not found' });
+    return res.status(404).json({ error: 'Chave API não encontrada' });
   }
   
   execute('UPDATE api_keys SET active = 0 WHERE id = ?', [req.params.id]);
@@ -760,7 +792,7 @@ router.patch('/webhooks/:id', requireAuth, (req, res) => {
   );
   
   if (!webhook) {
-    return res.status(404).json({ error: 'Webhook not found' });
+    return res.status(404).json({ error: 'Webhook não encontrado' });
   }
   
   const { active } = req.body;
@@ -785,7 +817,7 @@ router.delete('/webhooks/:id', requireAuth, (req, res) => {
   );
   
   if (!webhook) {
-    return res.status(404).json({ error: 'Webhook not found' });
+    return res.status(404).json({ error: 'Webhook não encontrado' });
   }
   
   execute('DELETE FROM webhooks WHERE id = ?', [req.params.id]);

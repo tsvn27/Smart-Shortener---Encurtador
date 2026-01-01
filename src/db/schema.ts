@@ -4,6 +4,7 @@ CREATE TABLE IF NOT EXISTS users (
   email TEXT UNIQUE NOT NULL,
   password_hash TEXT NOT NULL,
   name TEXT NOT NULL,
+  avatar TEXT,
   plan TEXT DEFAULT 'free',
   max_links INTEGER DEFAULT 100,
   max_api_keys INTEGER DEFAULT 5,

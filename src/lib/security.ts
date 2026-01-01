@@ -25,7 +25,7 @@ const BLOCKED_PATTERNS = [
   /union\s+select/gi, /insert\s+into/gi, /drop\s+table/gi,
   /delete\s+from/gi, /update\s+.*set/gi, /exec\s*\(/gi,
   /eval\s*\(/gi, /expression\s*\(/gi, /vbscript:/gi,
-  /data:/gi, /base64/gi, /&#/g, /%3c/gi, /%3e/gi,
+  /&#/g, /%3c/gi, /%3e/gi,
   /\x00/g, /\x1a/g, /\x0d/g, /\x0a/g,
 ];
 
@@ -218,30 +218,30 @@ export const securityMiddleware = (req: Request, res: Response, next: NextFuncti
   
   if (isIPBlocked(ip)) {
     logger.warn(`Blocked request from ${ip}`);
-    return res.status(403).json({ error: 'Access denied' });
+    return res.status(403).json({ error: 'Acesso negado' });
   }
   
   const fingerprint = generateFingerprint(req);
   if (!checkRequestFingerprint(fingerprint)) {
     blockIP(ip, 300000, 'Rate limit exceeded by fingerprint');
-    return res.status(429).json({ error: 'Too many requests' });
+    return res.status(429).json({ error: 'Muitas requisições' });
   }
   
   const botCheck = detectBot(req);
   if (botCheck.isBot && !req.path.startsWith('/api/v1/stats/public') && !req.path.startsWith('/health')) {
     recordSuspiciousActivity(ip);
     logger.warn(`Bot detected from ${ip}: ${botCheck.reason}`);
-    return res.status(403).json({ error: 'Access denied' });
+    return res.status(403).json({ error: 'Acesso negado' });
   }
   
   if (req.body && typeof req.body === 'object') {
     for (const [key, value] of Object.entries(req.body)) {
-      if (typeof value === 'string') {
+      if (typeof value === 'string' && key !== 'avatar' && value.length < 10000) {
         const validation = validateInput(value);
         if (!validation.valid) {
           recordSuspiciousActivity(ip);
           logger.warn(`Invalid input from ${ip}: ${validation.reason}`);
-          return res.status(400).json({ error: 'Invalid input' });
+          return res.status(400).json({ error: 'Entrada inválida' });
         }
       }
     }
@@ -251,7 +251,7 @@ export const securityMiddleware = (req: Request, res: Response, next: NextFuncti
   const urlValidation = validateInput(url);
   if (!urlValidation.valid) {
     recordSuspiciousActivity(ip);
-    return res.status(400).json({ error: 'Invalid request' });
+    return res.status(400).json({ error: 'Requisição inválida' });
   }
   
   next();

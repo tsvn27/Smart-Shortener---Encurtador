@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
 import Link from "next/link"
 import { api } from "@/lib/api"
@@ -19,6 +19,13 @@ export function ResetPasswordForm() {
   const [isLoading, setIsLoading] = useState(false)
   const [success, setSuccess] = useState(false)
   const [error, setError] = useState("")
+
+  useEffect(() => {
+    const authToken = localStorage.getItem("auth_token")
+    if (authToken) {
+      router.push("/dashboard")
+    }
+  }, [router])
 
   if (!token) {
     return (
@@ -48,8 +55,8 @@ export function ResetPasswordForm() {
       return
     }
 
-    if (password.length < 6) {
-      setError("A senha deve ter pelo menos 6 caracteres")
+    if (password.length < 8) {
+      setError("A senha deve ter pelo menos 8 caracteres")
       return
     }
 

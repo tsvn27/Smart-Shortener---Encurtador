@@ -22,26 +22,26 @@ export function validateUrl(url: string): { valid: boolean; error?: string } {
     const parsed = new URL(url);
     
     if (!['http:', 'https:'].includes(parsed.protocol)) {
-      return { valid: false, error: 'Only HTTP and HTTPS URLs are allowed' };
+      return { valid: false, error: 'Apenas URLs HTTP e HTTPS são permitidas' };
     }
     
     const hostname = parsed.hostname.toLowerCase();
     
     if (BLOCKED_DOMAINS.some(domain => hostname.includes(domain))) {
-      return { valid: false, error: 'URL shorteners are not allowed' };
+      return { valid: false, error: 'Encurtadores de URL não são permitidos' };
     }
     
     if (hostname === 'localhost' || hostname.startsWith('127.') || hostname.startsWith('192.168.') || hostname.startsWith('10.')) {
-      return { valid: false, error: 'Local URLs are not allowed' };
+      return { valid: false, error: 'URLs locais não são permitidas' };
     }
     
     if (BLOCKED_PATTERNS.some(pattern => pattern.test(url))) {
-      return { valid: false, error: 'URL contains blocked content' };
+      return { valid: false, error: 'URL contém conteúdo bloqueado' };
     }
     
     return { valid: true };
   } catch {
-    return { valid: false, error: 'Invalid URL format' };
+    return { valid: false, error: 'Formato de URL inválido' };
   }
 }
 

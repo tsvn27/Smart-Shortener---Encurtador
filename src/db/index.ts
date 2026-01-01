@@ -16,6 +16,17 @@ export function initDb(): void {
   const database = getDb();
   database.exec(schema);
   database.exec(schemaExtended);
+  runMigrations(database);
+}
+
+function runMigrations(database: Database.Database): void {
+  try {
+    const hasAvatar = database.prepare("SELECT * FROM pragma_table_info('users') WHERE name = 'avatar'").get();
+    if (!hasAvatar) {
+      database.exec("ALTER TABLE users ADD COLUMN avatar TEXT");
+    }
+  } catch (e) {
+  }
 }
 
 export function closeDb(): void {
