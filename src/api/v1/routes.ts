@@ -142,7 +142,6 @@ router.post('/auth/login', authLimiter, validateBody(loginSchema), async (req, r
     return res.status(401).json({ error: 'Email ou senha incorretos' });
   }
   
-  // Check if 2FA is enabled
   if (user.two_fa_enabled === 1) {
     if (!twoFACode) {
       return res.status(200).json({ 
@@ -307,7 +306,6 @@ router.delete('/auth/avatar', requireAuth, (req, res) => {
   res.json({ data: { message: 'Avatar removido' } });
 });
 
-// 2FA Routes
 router.get('/auth/2fa/status', requireAuth, (req, res) => {
   const userId = req.user!.id;
   const user = queryOne<UserRow>('SELECT two_fa_enabled FROM users WHERE id = ?', [userId]);
@@ -332,7 +330,6 @@ router.post('/auth/2fa/setup', requireAuth, async (req, res) => {
   try {
     const qrCode = await QRCode.toDataURL(otpauth);
     
-    // Store secret temporarily (not enabled yet)
     execute('UPDATE users SET two_fa_secret = ? WHERE id = ?', [secret, userId]);
     
     res.json({ 

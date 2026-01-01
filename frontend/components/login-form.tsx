@@ -62,7 +62,6 @@ export function LoginForm() {
     }
   }
 
-  // 2FA Screen
   if (requires2FA) {
     return (
       <div

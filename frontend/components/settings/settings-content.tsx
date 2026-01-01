@@ -285,7 +285,6 @@ export function SettingsContent() {
 
   const handle2FAToggle = async (enabled: boolean) => {
     if (enabled) {
-      // Start 2FA setup
       setLoading2FA(true)
       try {
         const res = await api.setup2FA()
@@ -298,7 +297,6 @@ export function SettingsContent() {
         setLoading2FA(false)
       }
     } else {
-      // Show disable modal
       setShow2FADisable(true)
     }
   }

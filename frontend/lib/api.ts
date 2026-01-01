@@ -161,7 +161,6 @@ class ApiClient {
     })
   }
 
-  // 2FA Methods
   async get2FAStatus() {
     return this.request<ApiResponse<{ enabled: boolean }>>("/auth/2fa/status")
   }

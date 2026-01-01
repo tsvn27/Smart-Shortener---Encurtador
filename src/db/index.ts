@@ -28,7 +28,6 @@ function runMigrations(database: Database.Database): void {
   } catch (e) {
   }
   
-  // 2FA migration
   try {
     const hasTwoFASecret = database.prepare("SELECT * FROM pragma_table_info('users') WHERE name = 'two_fa_secret'").get();
     if (!hasTwoFASecret) {
