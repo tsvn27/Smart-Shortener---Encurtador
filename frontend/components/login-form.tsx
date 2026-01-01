@@ -9,7 +9,7 @@ import { Logo } from "@/components/ui/logo"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Eye, EyeOff, Loader2, Key, ArrowRight } from "lucide-react"
+import { Eye, EyeOff, Loader2, Key, ArrowRight, ShieldCheck } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/lib/auth"
 
@@ -23,6 +23,8 @@ export function LoginForm() {
   const [mounted, setMounted] = useState(false)
   const [focusedField, setFocusedField] = useState<string | null>(null)
   const [error, setError] = useState("")
+  const [requires2FA, setRequires2FA] = useState(false)
+  const [twoFACode, setTwoFACode] = useState("")
   
   const [name, setName] = useState("")
   const [email, setEmail] = useState("")
@@ -43,15 +45,104 @@ export function LoginForm() {
     try {
       if (isRegister) {
         await register(name, email, password)
+        router.push("/dashboard")
       } else {
-        await login(email, password)
+        const result = await login(email, password, requires2FA ? twoFACode : undefined)
+        if (result.requires2FA) {
+          setRequires2FA(true)
+          setIsLoading(false)
+          return
+        }
+        router.push("/dashboard")
       }
-      router.push("/dashboard")
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro ao fazer login")
     } finally {
       setIsLoading(false)
     }
+  }
+
+  // 2FA Screen
+  if (requires2FA) {
+    return (
+      <div
+        className={cn(
+          "w-full max-w-[400px] transition-all duration-500",
+          mounted ? "opacity-100 translate-y-0" : "opacity-0 translate-y-4",
+        )}
+      >
+        <div className="glass-strong rounded-2xl p-8 relative overflow-hidden">
+          <div className="absolute inset-0 rounded-2xl glow-subtle pointer-events-none" />
+
+          <div className="relative space-y-8">
+            <div className="flex justify-center">
+              <Logo size="lg" />
+            </div>
+
+            <div className="text-center space-y-2">
+              <div className="flex justify-center mb-4">
+                <div className="p-3 rounded-full bg-primary/10">
+                  <ShieldCheck className="w-8 h-8 text-primary" />
+                </div>
+              </div>
+              <h1 className="text-xl font-semibold text-foreground">Verificação 2FA</h1>
+              <p className="text-sm text-muted-foreground">Digite o código do seu app autenticador</p>
+            </div>
+
+            {error && (
+              <div className="p-3 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-400 text-sm">
+                {error}
+              </div>
+            )}
+
+            <form onSubmit={handleSubmit} className="space-y-5">
+              <div className="space-y-2">
+                <Label htmlFor="twoFACode" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                  Código 2FA
+                </Label>
+                <Input
+                  id="twoFACode"
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={6}
+                  placeholder="000000"
+                  value={twoFACode}
+                  onChange={(e) => setTwoFACode(e.target.value.replace(/\D/g, ''))}
+                  className="h-12 bg-white/[0.03] border-white/[0.08] text-center text-2xl tracking-[0.5em] font-mono"
+                  autoFocus
+                />
+              </div>
+
+              <Button
+                type="submit"
+                disabled={isLoading || twoFACode.length !== 6}
+                className="w-full h-12 bg-primary hover:bg-primary/90 text-primary-foreground font-medium"
+              >
+                {isLoading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin mr-2" />
+                    Verificando...
+                  </>
+                ) : (
+                  <>
+                    Verificar
+                    <ArrowRight className="w-4 h-4 ml-2" />
+                  </>
+                )}
+              </Button>
+            </form>
+
+            <button
+              onClick={() => { setRequires2FA(false); setTwoFACode(""); setError(""); }}
+              className="w-full text-center text-sm text-muted-foreground hover:text-foreground transition-colors"
+            >
+              Voltar para login
+            </button>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   if (showApiKey) {
@@ -66,18 +157,15 @@ export function LoginForm() {
           <div className="absolute inset-0 rounded-2xl glow-subtle pointer-events-none" />
 
           <div className="relative space-y-8">
-            {/* Logo */}
             <div className="flex justify-center">
               <Logo size="lg" />
             </div>
 
-            {/* Header */}
             <div className="text-center space-y-2">
               <h1 className="text-xl font-semibold text-foreground">Autenticação via API</h1>
               <p className="text-sm text-muted-foreground">Cole sua chave de acesso</p>
             </div>
 
-            {/* Form */}
             <form onSubmit={handleSubmit} className="space-y-5">
               <div className="space-y-2">
                 <Label htmlFor="apiKey" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
@@ -127,7 +215,6 @@ export function LoginForm() {
               </Button>
             </form>
 
-            {/* Back */}
             <button
               onClick={() => setShowApiKey(false)}
               className="w-full text-center text-sm text-muted-foreground hover:text-foreground transition-colors"
@@ -151,7 +238,6 @@ export function LoginForm() {
         <div className="absolute inset-0 rounded-2xl glow-subtle pointer-events-none" />
 
         <div className="relative space-y-8">
-          {/* Logo with animation */}
           <div
             className={cn(
               "flex justify-center transition-all duration-500 delay-100",
@@ -161,7 +247,6 @@ export function LoginForm() {
             <Logo size="lg" />
           </div>
 
-          {/* Header */}
           <div
             className={cn(
               "text-center space-y-2 transition-all duration-500 delay-200",
@@ -176,14 +261,12 @@ export function LoginForm() {
             </p>
           </div>
 
-          {/* Error */}
           {error && (
             <div className="p-3 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-400 text-sm">
               {error}
             </div>
           )}
 
-          {/* Form */}
           <form
             onSubmit={handleSubmit}
             className={cn(
@@ -293,7 +376,6 @@ export function LoginForm() {
             </Button>
           </form>
 
-          {/* Divider */}
           <div className={cn("relative transition-all duration-500 delay-400", mounted ? "opacity-100" : "opacity-0")}>
             <div className="absolute inset-0 flex items-center">
               <div className="w-full border-t border-white/[0.06]" />
@@ -303,7 +385,6 @@ export function LoginForm() {
             </div>
           </div>
 
-          {/* API Key login */}
           <button
             onClick={() => setShowApiKey(true)}
             className={cn(
@@ -315,7 +396,6 @@ export function LoginForm() {
             API Key
           </button>
 
-          {/* Sign up */}
           <p
             className={cn(
               "text-center text-sm text-muted-foreground transition-all duration-500 delay-[600ms]",
@@ -333,7 +413,6 @@ export function LoginForm() {
         </div>
       </div>
 
-      {/* Footer badge */}
       <div
         className={cn(
           "flex items-center justify-center gap-2 mt-6 text-xs text-muted-foreground/60 transition-all duration-500 delay-700",

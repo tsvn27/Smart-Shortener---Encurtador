@@ -109,10 +109,10 @@ class ApiClient {
     return this.request<ApiResponse<ClickEvent[]>>(`/links/${id}/clicks?limit=${limit}&offset=${offset}`)
   }
 
-  async login(email: string, password: string) {
-    return this.request<ApiResponse<{ token: string; user: User }>>("/auth/login", {
+  async login(email: string, password: string, twoFACode?: string) {
+    return this.request<ApiResponse<{ token?: string; user?: User; requires2FA?: boolean; message?: string }>>("/auth/login", {
       method: "POST",
-      body: JSON.stringify({ email, password }),
+      body: JSON.stringify({ email, password, twoFACode }),
     })
   }
 
@@ -158,6 +158,31 @@ class ApiClient {
     return this.request<ApiResponse<{ message: string }>>("/auth/change-password", {
       method: "POST",
       body: JSON.stringify({ currentPassword, newPassword }),
+    })
+  }
+
+  // 2FA Methods
+  async get2FAStatus() {
+    return this.request<ApiResponse<{ enabled: boolean }>>("/auth/2fa/status")
+  }
+
+  async setup2FA() {
+    return this.request<ApiResponse<{ secret: string; qrCode: string; otpauth: string }>>("/auth/2fa/setup", {
+      method: "POST",
+    })
+  }
+
+  async verify2FA(code: string) {
+    return this.request<ApiResponse<{ message: string }>>("/auth/2fa/verify", {
+      method: "POST",
+      body: JSON.stringify({ code }),
+    })
+  }
+
+  async disable2FA(code: string) {
+    return this.request<ApiResponse<{ message: string }>>("/auth/2fa/disable", {
+      method: "POST",
+      body: JSON.stringify({ code }),
     })
   }
 
@@ -293,6 +318,7 @@ export interface User {
   email: string
   name: string
   avatar?: string
+  twoFAEnabled?: boolean
   createdAt: string
   updatedAt: string
 }

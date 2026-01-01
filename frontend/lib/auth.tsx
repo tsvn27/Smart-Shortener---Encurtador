@@ -7,7 +7,7 @@ interface AuthContextType {
   user: User | null
   isLoading: boolean
   isAuthenticated: boolean
-  login: (email: string, password: string) => Promise<void>
+  login: (email: string, password: string, twoFACode?: string) => Promise<{ requires2FA?: boolean }>
   register: (name: string, email: string, password: string) => Promise<void>
   logout: () => void
   refreshUser: () => Promise<void>
@@ -31,10 +31,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  const login = async (email: string, password: string) => {
-    const res = await api.login(email, password)
-    api.setToken(res.data.token)
-    setUser(res.data.user)
+  const login = async (email: string, password: string, twoFACode?: string) => {
+    const res = await api.login(email, password, twoFACode)
+    
+    if (res.data.requires2FA) {
+      return { requires2FA: true }
+    }
+    
+    if (res.data.token && res.data.user) {
+      api.setToken(res.data.token)
+      setUser(res.data.user)
+    }
+    
+    return {}
   }
 
   const register = async (name: string, email: string, password: string) => {

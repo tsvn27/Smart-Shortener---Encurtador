@@ -2,6 +2,8 @@ import { Router } from 'express';
 import { z } from 'zod';
 import { nanoid } from 'nanoid';
 import { createHash, randomBytes } from 'crypto';
+import { authenticator } from 'otplib';
+import QRCode from 'qrcode';
 import { linkRepository } from '../../repositories/link-repository.js';
 import { clickRepository } from '../../repositories/click-repository.js';
 import { validateBody, validateQuery } from '../middleware/validation.js';
@@ -21,6 +23,8 @@ interface UserRow {
   password_hash: string;
   name: string;
   avatar: string | null;
+  two_fa_secret: string | null;
+  two_fa_enabled: number;
   plan: string;
   max_links: number;
   max_api_keys: number;
@@ -60,6 +64,7 @@ interface PasswordResetRow {
 const loginSchema = z.object({
   email: z.string().email().max(254),
   password: z.string().min(6).max(128),
+  twoFACode: z.string().length(6).optional(),
 });
 
 const registerSchema = z.object({
@@ -119,7 +124,7 @@ router.post('/auth/register', authLimiter, validateBody(registerSchema), async (
 });
 
 router.post('/auth/login', authLimiter, validateBody(loginSchema), async (req, res) => {
-  const { email, password } = req.body;
+  const { email, password, twoFACode } = req.body;
   const ip = getClientIP(req);
   
   const sanitizedEmail = sanitizeInput(email.toLowerCase().trim());
@@ -137,6 +142,25 @@ router.post('/auth/login', authLimiter, validateBody(loginSchema), async (req, r
     return res.status(401).json({ error: 'Email ou senha incorretos' });
   }
   
+  // Check if 2FA is enabled
+  if (user.two_fa_enabled === 1) {
+    if (!twoFACode) {
+      return res.status(200).json({ 
+        data: { 
+          requires2FA: true,
+          message: 'Código 2FA necessário' 
+        } 
+      });
+    }
+    
+    const isValid2FA = authenticator.verify({ token: twoFACode, secret: user.two_fa_secret! });
+    if (!isValid2FA) {
+      logger.warn(`Failed 2FA attempt for ${sanitizedEmail}`, { ip });
+      recordSuspiciousActivity(ip);
+      return res.status(401).json({ error: 'Código 2FA inválido' });
+    }
+  }
+  
   const token = generateToken(user.id);
   setAuthCookie(res, token);
   logger.info(`User logged in: ${sanitizedEmail}`, { ip });
@@ -149,6 +173,7 @@ router.post('/auth/login', authLimiter, validateBody(loginSchema), async (req, r
         email: user.email,
         name: user.name,
         avatar: user.avatar || undefined,
+        twoFAEnabled: user.two_fa_enabled === 1,
         createdAt: user.created_at,
         updatedAt: user.updated_at,
       },
@@ -240,12 +265,14 @@ router.post('/auth/reset-password', passwordResetLimiter, validateBody(resetPass
 
 router.get('/auth/me', requireAuth, (req, res) => {
   const user = req.user!;
+  const userRow = queryOne<UserRow>('SELECT two_fa_enabled FROM users WHERE id = ?', [user.id]);
   res.json({
     data: {
       id: user.id,
       email: user.email,
       name: user.name,
       avatar: user.avatar,
+      twoFAEnabled: userRow?.two_fa_enabled === 1,
       createdAt: user.createdAt,
       updatedAt: user.updatedAt,
     },
@@ -278,6 +305,96 @@ router.delete('/auth/avatar', requireAuth, (req, res) => {
   const userId = req.user!.id;
   execute('UPDATE users SET avatar = NULL, updated_at = ? WHERE id = ?', [new Date().toISOString(), userId]);
   res.json({ data: { message: 'Avatar removido' } });
+});
+
+// 2FA Routes
+router.get('/auth/2fa/status', requireAuth, (req, res) => {
+  const userId = req.user!.id;
+  const user = queryOne<UserRow>('SELECT two_fa_enabled FROM users WHERE id = ?', [userId]);
+  res.json({ data: { enabled: user?.two_fa_enabled === 1 } });
+});
+
+router.post('/auth/2fa/setup', requireAuth, async (req, res) => {
+  const userId = req.user!.id;
+  const user = queryOne<UserRow>('SELECT * FROM users WHERE id = ?', [userId]);
+  
+  if (!user) {
+    return res.status(404).json({ error: 'Usuário não encontrado' });
+  }
+  
+  if (user.two_fa_enabled === 1) {
+    return res.status(400).json({ error: '2FA já está ativado' });
+  }
+  
+  const secret = authenticator.generateSecret();
+  const otpauth = authenticator.keyuri(user.email, 'Smart Shortener', secret);
+  
+  try {
+    const qrCode = await QRCode.toDataURL(otpauth);
+    
+    // Store secret temporarily (not enabled yet)
+    execute('UPDATE users SET two_fa_secret = ? WHERE id = ?', [secret, userId]);
+    
+    res.json({ 
+      data: { 
+        secret,
+        qrCode,
+        otpauth
+      } 
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Erro ao gerar QR Code' });
+  }
+});
+
+const verify2FASchema = z.object({
+  code: z.string().length(6),
+});
+
+router.post('/auth/2fa/verify', requireAuth, validateBody(verify2FASchema), (req, res) => {
+  const { code } = req.body;
+  const userId = req.user!.id;
+  
+  const user = queryOne<UserRow>('SELECT two_fa_secret, two_fa_enabled FROM users WHERE id = ?', [userId]);
+  
+  if (!user || !user.two_fa_secret) {
+    return res.status(400).json({ error: 'Configure o 2FA primeiro' });
+  }
+  
+  if (user.two_fa_enabled === 1) {
+    return res.status(400).json({ error: '2FA já está ativado' });
+  }
+  
+  const isValid = authenticator.verify({ token: code, secret: user.two_fa_secret });
+  
+  if (!isValid) {
+    return res.status(400).json({ error: 'Código inválido' });
+  }
+  
+  execute('UPDATE users SET two_fa_enabled = 1, updated_at = ? WHERE id = ?', [new Date().toISOString(), userId]);
+  
+  res.json({ data: { message: '2FA ativado com sucesso' } });
+});
+
+router.post('/auth/2fa/disable', requireAuth, validateBody(verify2FASchema), (req, res) => {
+  const { code } = req.body;
+  const userId = req.user!.id;
+  
+  const user = queryOne<UserRow>('SELECT two_fa_secret, two_fa_enabled FROM users WHERE id = ?', [userId]);
+  
+  if (!user || user.two_fa_enabled !== 1) {
+    return res.status(400).json({ error: '2FA não está ativado' });
+  }
+  
+  const isValid = authenticator.verify({ token: code, secret: user.two_fa_secret! });
+  
+  if (!isValid) {
+    return res.status(400).json({ error: 'Código inválido' });
+  }
+  
+  execute('UPDATE users SET two_fa_enabled = 0, two_fa_secret = NULL, updated_at = ? WHERE id = ?', [new Date().toISOString(), userId]);
+  
+  res.json({ data: { message: '2FA desativado com sucesso' } });
 });
 
 const changePasswordSchema = z.object({

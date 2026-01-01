@@ -54,6 +54,12 @@ export function SettingsContent() {
   const [newKeyName, setNewKeyName] = useState("")
   const [newWebhookUrl, setNewWebhookUrl] = useState("")
   const [twoFAEnabled, setTwoFAEnabled] = useState(false)
+  const [show2FASetup, setShow2FASetup] = useState(false)
+  const [show2FADisable, setShow2FADisable] = useState(false)
+  const [twoFASecret, setTwoFASecret] = useState("")
+  const [twoFAQRCode, setTwoFAQRCode] = useState("")
+  const [twoFACode, setTwoFACode] = useState("")
+  const [loading2FA, setLoading2FA] = useState(false)
   const [emailNotifications, setEmailNotifications] = useState(true)
   const [weeklyReport, setWeeklyReport] = useState(true)
   const [showPasswordModal, setShowPasswordModal] = useState(false)
@@ -65,7 +71,10 @@ export function SettingsContent() {
   const [deletingAccount, setDeletingAccount] = useState(false)
 
   useEffect(() => {
-    if (user) setName(user.name)
+    if (user) {
+      setName(user.name)
+      setTwoFAEnabled(user.twoFAEnabled || false)
+    }
   }, [user])
 
   useEffect(() => {
@@ -274,6 +283,62 @@ export function SettingsContent() {
     }
   }
 
+  const handle2FAToggle = async (enabled: boolean) => {
+    if (enabled) {
+      // Start 2FA setup
+      setLoading2FA(true)
+      try {
+        const res = await api.setup2FA()
+        setTwoFASecret(res.data.secret)
+        setTwoFAQRCode(res.data.qrCode)
+        setShow2FASetup(true)
+      } catch (err: any) {
+        showError(err.message || "Erro ao configurar 2FA")
+      } finally {
+        setLoading2FA(false)
+      }
+    } else {
+      // Show disable modal
+      setShow2FADisable(true)
+    }
+  }
+
+  const verify2FA = async () => {
+    if (twoFACode.length !== 6) return
+    setLoading2FA(true)
+    try {
+      await api.verify2FA(twoFACode)
+      setTwoFAEnabled(true)
+      setShow2FASetup(false)
+      setTwoFACode("")
+      setTwoFASecret("")
+      setTwoFAQRCode("")
+      await refreshUser?.()
+      success("2FA ativado com sucesso!")
+    } catch (err: any) {
+      showError(err.message || "Código inválido")
+    } finally {
+      setLoading2FA(false)
+    }
+  }
+
+  const disable2FA = async () => {
+    if (twoFACode.length !== 6) return
+    setLoading2FA(true)
+    try {
+      await api.disable2FA(twoFACode)
+      setTwoFAEnabled(false)
+      setShow2FADisable(false)
+      setTwoFACode("")
+      await refreshUser?.()
+      success("2FA desativado com sucesso!")
+    } catch (err: any) {
+      showError(err.message || "Código inválido")
+    } finally {
+      setLoading2FA(false)
+    }
+  }
+
   return (
     <div className="max-w-4xl mx-auto">
       <div className="mb-8 animate-fade-in">
@@ -398,7 +463,18 @@ export function SettingsContent() {
                   onClick={() => setShowPasswordModal(true)}
                   clickable 
                 />
-                <SettingRow icon={<Fingerprint className="w-4 h-4" />} title="Autenticação 2FA" description={twoFAEnabled ? "Ativado" : "Desativado"} action={<Switch checked={twoFAEnabled} onCheckedChange={setTwoFAEnabled} />} />
+                <SettingRow 
+                  icon={<Fingerprint className="w-4 h-4" />} 
+                  title="Autenticação 2FA" 
+                  description={twoFAEnabled ? "Ativado - Protegido com autenticador" : "Desativado"} 
+                  action={
+                    loading2FA ? (
+                      <Loader2 className="w-4 h-4 animate-spin text-primary" />
+                    ) : (
+                      <Switch checked={twoFAEnabled} onCheckedChange={handle2FAToggle} />
+                    )
+                  } 
+                />
               </div>
 
               <div className="glass-card rounded-xl p-6">
@@ -575,6 +651,105 @@ export function SettingsContent() {
         onConfirm={handleDeleteAccount}
         onCancel={() => setShowDeleteAccountModal(false)}
       />
+
+      {/* 2FA Setup Modal */}
+      {show2FASetup && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => { setShow2FASetup(false); setTwoFACode(""); }} />
+          <div className="relative glass-card rounded-2xl p-6 w-full max-w-md mx-4 animate-scale-in">
+            <h3 className="text-lg font-semibold text-foreground mb-2">Configurar 2FA</h3>
+            <p className="text-sm text-muted-foreground mb-6">Escaneie o QR Code com seu app autenticador (Google Authenticator, Authy, etc.)</p>
+            
+            <div className="flex justify-center mb-6">
+              {twoFAQRCode && (
+                <img src={twoFAQRCode} alt="QR Code 2FA" className="w-48 h-48 rounded-lg" />
+              )}
+            </div>
+            
+            <div className="mb-6">
+              <p className="text-xs text-muted-foreground mb-2">Ou digite o código manualmente:</p>
+              <div className="flex items-center gap-2">
+                <code className="flex-1 p-2 rounded bg-white/[0.05] text-xs font-mono text-foreground break-all">{twoFASecret}</code>
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={() => { navigator.clipboard.writeText(twoFASecret); success("Código copiado!"); }}
+                  className="border-white/[0.08] bg-transparent"
+                >
+                  <Copy className="w-4 h-4" />
+                </Button>
+              </div>
+            </div>
+            
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label className="text-xs text-muted-foreground">Digite o código do app para confirmar</Label>
+                <Input 
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={6}
+                  placeholder="000000"
+                  value={twoFACode}
+                  onChange={(e) => setTwoFACode(e.target.value.replace(/\D/g, ''))}
+                  className="h-12 bg-white/[0.03] border-white/[0.08] text-center text-2xl tracking-[0.5em] font-mono"
+                />
+              </div>
+            </div>
+            
+            <div className="flex items-center justify-end gap-3 mt-6">
+              <Button variant="outline" onClick={() => { setShow2FASetup(false); setTwoFACode(""); }} className="border-white/[0.08] bg-transparent">
+                Cancelar
+              </Button>
+              <Button onClick={verify2FA} disabled={loading2FA || twoFACode.length !== 6}>
+                {loading2FA ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <ShieldCheck className="w-4 h-4 mr-2" />}
+                Ativar 2FA
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 2FA Disable Modal */}
+      {show2FADisable && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => { setShow2FADisable(false); setTwoFACode(""); }} />
+          <div className="relative glass-card rounded-2xl p-6 w-full max-w-md mx-4 animate-scale-in">
+            <h3 className="text-lg font-semibold text-foreground mb-2">Desativar 2FA</h3>
+            <p className="text-sm text-muted-foreground mb-6">Digite o código do seu app autenticador para confirmar a desativação.</p>
+            
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <Label className="text-xs text-muted-foreground">Código 2FA</Label>
+                <Input 
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={6}
+                  placeholder="000000"
+                  value={twoFACode}
+                  onChange={(e) => setTwoFACode(e.target.value.replace(/\D/g, ''))}
+                  className="h-12 bg-white/[0.03] border-white/[0.08] text-center text-2xl tracking-[0.5em] font-mono"
+                />
+              </div>
+            </div>
+            
+            <div className="flex items-center justify-end gap-3 mt-6">
+              <Button variant="outline" onClick={() => { setShow2FADisable(false); setTwoFACode(""); }} className="border-white/[0.08] bg-transparent">
+                Cancelar
+              </Button>
+              <Button 
+                onClick={disable2FA} 
+                disabled={loading2FA || twoFACode.length !== 6}
+                className="bg-rose-500 hover:bg-rose-600"
+              >
+                {loading2FA ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+                Desativar 2FA
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -19,14 +19,12 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Smart Shortener",
-  description: "Intelligent URL shortener with analytics, smart rules, and bot protection",
+  description: "Encurtador de links inteligente com analytics, regras e proteção contra bots",
   icons: {
     icon: [
-      { url: "/icon-light-32x32.png", media: "(prefers-color-scheme: light)" },
-      { url: "/icon-dark-32x32.png", media: "(prefers-color-scheme: dark)" },
       { url: "/icon.svg", type: "image/svg+xml" },
     ],
-    apple: "/apple-icon.png",
+    apple: "/icon.svg",
   },
 }
 
