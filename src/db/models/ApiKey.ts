@@ -39,7 +39,6 @@ const apiKeySchema = new Schema<IApiKey>({
   _id: false,
 });
 
-apiKeySchema.index({ keyHash: 1 });
 apiKeySchema.index({ ownerId: 1 });
 
 export const ApiKey = mongoose.model<IApiKey>('ApiKey', apiKeySchema);

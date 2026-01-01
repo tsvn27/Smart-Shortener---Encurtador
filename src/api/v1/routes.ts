@@ -421,6 +421,31 @@ router.get('/stats/dashboard', requireAuth, async (req, res) => {
   res.json({ data: { totalLinks: linksCount, totalClicks, clicksToday, botsBlocked, clicksByDay } });
 });
 
+router.get('/stats/analytics', requireAuth, async (req, res) => {
+  const userId = req.user!.id;
+  
+  const links = await Link.find({ ownerId: userId });
+  const linkIds = links.map(l => l._id);
+  
+  const [byCountry, byDevice, byBrowser, byHour, suspiciousClicks] = await Promise.all([
+    clickRepository.getGlobalClicksByCountry(linkIds),
+    clickRepository.getGlobalClicksByDevice(linkIds),
+    clickRepository.getGlobalClicksByBrowser(linkIds),
+    clickRepository.getGlobalClicksByHour(linkIds),
+    clickRepository.getGlobalSuspiciousClicks(linkIds),
+  ]);
+  
+  res.json({
+    data: {
+      byCountry,
+      byDevice,
+      byBrowser,
+      byHour,
+      suspiciousClicks,
+    },
+  });
+});
+
 const createLinkSchema = z.object({
   url: z.string().url(),
   customCode: z.string().min(3).max(32).optional(),
@@ -441,11 +466,29 @@ const updateLinkSchema = createLinkSchema.partial();
 const listQuerySchema = z.object({
   limit: z.coerce.number().min(1).max(100).default(20),
   offset: z.coerce.number().min(0).default(0),
+  search: z.string().optional(),
+  status: z.enum(['all', 'active', 'paused', 'expired']).optional(),
+  sortBy: z.enum(['createdAt', 'totalClicks', 'clicksToday']).optional(),
+  sortOrder: z.enum(['asc', 'desc']).optional(),
 });
 
 router.get('/links', requireAuth, requirePermission('links:read'), validateQuery(listQuerySchema), async (req, res) => {
-  const { limit, offset } = req.query as unknown as { limit: number; offset: number };
-  const links = await linkRepository.findByOwner(req.user!.id, limit, offset);
+  const { limit, offset, search, status, sortBy, sortOrder } = req.query as unknown as { 
+    limit: number; 
+    offset: number;
+    search?: string;
+    status?: string;
+    sortBy?: string;
+    sortOrder?: string;
+  };
+  const links = await linkRepository.findByOwnerWithFilters(req.user!.id, {
+    limit,
+    offset,
+    search,
+    status: status === 'all' ? undefined : status,
+    sortBy: sortBy || 'createdAt',
+    sortOrder: sortOrder || 'desc',
+  });
   res.json({ data: links, meta: { limit, offset, count: links.length } });
 });
 

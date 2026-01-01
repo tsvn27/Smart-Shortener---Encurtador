@@ -46,6 +46,41 @@ export const linkRepository = {
     return docs.map(toLink);
   },
 
+  async findByOwnerWithFilters(ownerId: string, options: {
+    limit: number;
+    offset: number;
+    search?: string;
+    status?: string;
+    sortBy: string;
+    sortOrder: string;
+  }): Promise<LinkType[]> {
+    const { limit, offset, search, status, sortBy, sortOrder } = options;
+    
+    const query: Record<string, unknown> = { ownerId };
+    
+    if (search) {
+      query.$or = [
+        { shortCode: { $regex: search, $options: 'i' } },
+        { originalUrl: { $regex: search, $options: 'i' } },
+        { tags: { $in: [new RegExp(search, 'i')] } },
+      ];
+    }
+    
+    if (status) {
+      query.state = status;
+    }
+    
+    const sortDirection = sortOrder === 'asc' ? 1 : -1;
+    const sortField = sortBy || 'createdAt';
+    
+    const docs = await Link.find(query)
+      .sort({ [sortField]: sortDirection })
+      .skip(offset)
+      .limit(limit);
+    
+    return docs.map(toLink);
+  },
+
   async create(data: {
     originalUrl: string;
     ownerId: string;

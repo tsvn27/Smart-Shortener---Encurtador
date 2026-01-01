@@ -1,12 +1,11 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { api, type Link, type DashboardStats } from "@/lib/api"
+import { api, type Link, type DashboardStats, type AnalyticsStats } from "@/lib/api"
 import { MetricCard } from "@/components/ui/metric-card"
 import { CountryFlag } from "@/components/ui/country-flag"
-import { Sparkline } from "@/components/ui/sparkline"
 import { cn } from "@/lib/utils"
-import { Link2, MousePointer, MousePointerClick, Shield, Ban, AlertTriangle, Bot, Loader2 } from "lucide-react"
+import { Link2, MousePointer, MousePointerClick, Shield, Ban, AlertTriangle, Bot, Loader2, Monitor, Smartphone, Tablet, Globe } from "lucide-react"
 import {
   Area,
   AreaChart,
@@ -18,25 +17,43 @@ import {
   Pie,
   Cell,
   CartesianGrid,
+  BarChart,
+  Bar,
 } from "recharts"
 import NextLink from "next/link"
 
 type Period = "7d" | "30d" | "90d"
 
+const DEVICE_COLORS: Record<string, string> = {
+  mobile: "#6366F1",
+  desktop: "#8B5CF6",
+  tablet: "#A855F7",
+  Desconhecido: "#64748B",
+}
+
+const DEVICE_ICONS: Record<string, React.ReactNode> = {
+  mobile: <Smartphone className="w-3.5 h-3.5" />,
+  desktop: <Monitor className="w-3.5 h-3.5" />,
+  tablet: <Tablet className="w-3.5 h-3.5" />,
+}
+
 export function AnalyticsContent() {
   const [period, setPeriod] = useState<Period>("7d")
   const [stats, setStats] = useState<DashboardStats | null>(null)
+  const [analyticsStats, setAnalyticsStats] = useState<AnalyticsStats | null>(null)
   const [links, setLinks] = useState<Link[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     async function fetchData() {
       try {
-        const [statsRes, linksRes] = await Promise.all([
+        const [statsRes, analyticsRes, linksRes] = await Promise.all([
           api.getDashboardStats(),
+          api.getAnalyticsStats(),
           api.getLinks(100, 0),
         ])
         setStats(statsRes.data)
+        setAnalyticsStats(analyticsRes.data)
         setLinks(linksRes.data)
       } catch (err) {
         console.error("Failed to fetch analytics:", err)
@@ -55,23 +72,33 @@ export function AnalyticsContent() {
     )
   }
 
-  const deviceDistribution = [
-    { name: "Mobile", value: 62, fill: "#6366F1" },
-    { name: "Desktop", value: 31, fill: "#8B5CF6" },
-    { name: "Tablet", value: 7, fill: "#A855F7" },
-  ]
-
-  const topCountries = [
-    { code: "BR", country: "Brasil", percentage: 68 },
-    { code: "US", country: "Estados Unidos", percentage: 12 },
-    { code: "PT", country: "Portugal", percentage: 8 },
-    { code: "ES", country: "Espanha", percentage: 5 },
-    { code: "AR", country: "Argentina", percentage: 4 },
-  ]
-
   const topLinks = [...links].sort((a, b) => b.totalClicks - a.totalClicks).slice(0, 5)
-
   const botBlockRate = stats ? Math.round((stats.botsBlocked / Math.max(stats.totalClicks, 1)) * 100) : 0
+
+  const deviceData = analyticsStats?.byDevice.map(d => ({
+    name: d.device === 'mobile' ? 'Mobile' : d.device === 'desktop' ? 'Desktop' : d.device === 'tablet' ? 'Tablet' : d.device,
+    value: d.count,
+    fill: DEVICE_COLORS[d.device] || "#64748B",
+  })) || []
+
+  const totalDeviceClicks = deviceData.reduce((acc, d) => acc + d.value, 0)
+  const deviceDataWithPercentage = deviceData.map(d => ({
+    ...d,
+    percentage: totalDeviceClicks > 0 ? Math.round((d.value / totalDeviceClicks) * 100) : 0,
+  }))
+
+  const countryData = analyticsStats?.byCountry.map((c, i) => ({
+    ...c,
+    percentage: stats?.totalClicks ? Math.round((c.count / stats.totalClicks) * 100) : 0,
+  })) || []
+
+  const peakHoursData = analyticsStats?.byHour.map(h => ({
+    hour: `${h.hour}h-${h.hour + 1}h`,
+    clicks: h.count,
+    percentage: stats?.totalClicks ? Math.round((h.count / stats.totalClicks) * 100) : 0,
+  })) || []
+
+  const maxPeakClicks = Math.max(...peakHoursData.map(h => h.clicks), 1)
 
   return (
     <div className="space-y-8">
@@ -209,79 +236,96 @@ export function AnalyticsContent() {
 
         {/* Top Countries */}
         <div className="glass-card rounded-xl p-6 animate-fade-in" style={{ animationDelay: "300ms" }}>
-          <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-5">Top 5 Países</h3>
+          <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-5">Top Países</h3>
           <div className="space-y-3">
-            {topCountries.map((country, index) => (
-              <div key={country.code} className="flex items-center gap-3">
-                <span className="text-xs text-muted-foreground w-4 font-medium">{index + 1}</span>
-                <CountryFlag code={country.code} className="text-lg" />
-                <span className="text-sm text-foreground flex-1 truncate">{country.country}</span>
-                <span className="text-xs text-muted-foreground tabular-nums">{country.percentage}%</span>
+            {countryData.length === 0 ? (
+              <div className="flex flex-col items-center justify-center py-6 text-center">
+                <Globe className="w-8 h-8 text-muted-foreground mb-2" />
+                <p className="text-sm text-muted-foreground">Sem dados ainda</p>
               </div>
-            ))}
+            ) : (
+              countryData.slice(0, 5).map((country, index) => (
+                <div key={country.code} className="flex items-center gap-3">
+                  <span className="text-xs text-muted-foreground w-4 font-medium">{index + 1}</span>
+                  <CountryFlag code={country.code} className="text-lg" />
+                  <span className="text-sm text-foreground flex-1 truncate">{country.country}</span>
+                  <span className="text-xs text-muted-foreground tabular-nums">{country.percentage}%</span>
+                </div>
+              ))
+            )}
           </div>
         </div>
 
         {/* Device Distribution */}
         <div className="glass-card rounded-xl p-6 animate-fade-in" style={{ animationDelay: "350ms" }}>
           <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-5">Dispositivos</h3>
-          <div className="h-32">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={deviceDistribution}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={30}
-                  outerRadius={50}
-                  paddingAngle={3}
-                  dataKey="value"
-                >
-                  {deviceDistribution.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.fill} strokeWidth={0} />
-                  ))}
-                </Pie>
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-          <div className="space-y-2 mt-4">
-            {deviceDistribution.map((item) => (
-              <div key={item.name} className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: item.fill }} />
-                  <span className="text-xs text-muted-foreground">{item.name}</span>
-                </div>
-                <span className="text-xs text-foreground font-medium tabular-nums">{item.value}%</span>
+          {deviceDataWithPercentage.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-6 text-center">
+              <Monitor className="w-8 h-8 text-muted-foreground mb-2" />
+              <p className="text-sm text-muted-foreground">Sem dados ainda</p>
+            </div>
+          ) : (
+            <>
+              <div className="h-32">
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={deviceDataWithPercentage}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={30}
+                      outerRadius={50}
+                      paddingAngle={3}
+                      dataKey="value"
+                    >
+                      {deviceDataWithPercentage.map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={entry.fill} strokeWidth={0} />
+                      ))}
+                    </Pie>
+                  </PieChart>
+                </ResponsiveContainer>
               </div>
-            ))}
-          </div>
+              <div className="space-y-2 mt-4">
+                {deviceDataWithPercentage.map((item) => (
+                  <div key={item.name} className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: item.fill }} />
+                      <span className="text-xs text-muted-foreground">{item.name}</span>
+                    </div>
+                    <span className="text-xs text-foreground font-medium tabular-nums">{item.percentage}%</span>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
         </div>
 
         {/* Peak Hours */}
         <div className="glass-card rounded-xl p-6 animate-fade-in" style={{ animationDelay: "400ms" }}>
           <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-5">Horários de Pico</h3>
-          <div className="space-y-3">
-            {[
-              { hour: "14h-15h", clicks: 456, percentage: 100 },
-              { hour: "15h-16h", clicks: 412, percentage: 90 },
-              { hour: "13h-14h", clicks: 389, percentage: 85 },
-              { hour: "16h-17h", clicks: 356, percentage: 78 },
-              { hour: "12h-13h", clicks: 312, percentage: 68 },
-            ].map((item) => (
-              <div key={item.hour} className="space-y-1.5">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-muted-foreground">{item.hour}</span>
-                  <span className="text-foreground font-medium tabular-nums">{item.clicks}</span>
+          {peakHoursData.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-6 text-center">
+              <MousePointerClick className="w-8 h-8 text-muted-foreground mb-2" />
+              <p className="text-sm text-muted-foreground">Sem dados ainda</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {peakHoursData.map((item) => (
+                <div key={item.hour} className="space-y-1.5">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-muted-foreground">{item.hour}</span>
+                    <span className="text-foreground font-medium tabular-nums">{item.clicks}</span>
+                  </div>
+                  <div className="h-1.5 bg-white/[0.04] rounded-full overflow-hidden">
+                    <div
+                      className="h-full bg-primary rounded-full transition-all duration-500"
+                      style={{ width: `${(item.clicks / maxPeakClicks) * 100}%` }}
+                    />
+                  </div>
                 </div>
-                <div className="h-1.5 bg-white/[0.04] rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-gradient-to-r from-primary to-primary/60 rounded-full transition-all duration-500"
-                    style={{ width: `${item.percentage}%` }}
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
 
@@ -314,7 +358,7 @@ export function AnalyticsContent() {
               <AlertTriangle className="w-4 h-4 text-orange-400" />
               <span className="text-[10px] text-orange-400 uppercase tracking-wider font-medium">Suspeitos</span>
             </div>
-            <p className="text-2xl font-semibold text-orange-400 tabular-nums">0</p>
+            <p className="text-2xl font-semibold text-orange-400 tabular-nums">{analyticsStats?.suspiciousClicks || 0}</p>
           </div>
         </div>
 

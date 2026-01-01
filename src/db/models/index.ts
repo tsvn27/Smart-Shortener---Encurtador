@@ -1,6 +1,12 @@
-export { User, IUser } from './User.js';
-export { Link, ILink } from './Link.js';
-export { ClickEvent, IClickEvent } from './ClickEvent.js';
-export { ApiKey, IApiKey } from './ApiKey.js';
-export { Webhook, IWebhook } from './Webhook.js';
-export { PasswordReset, IPasswordReset } from './PasswordReset.js';
+export { User } from './User.js';
+export type { IUser } from './User.js';
+export { Link } from './Link.js';
+export type { ILink } from './Link.js';
+export { ClickEvent } from './ClickEvent.js';
+export type { IClickEvent } from './ClickEvent.js';
+export { ApiKey } from './ApiKey.js';
+export type { IApiKey } from './ApiKey.js';
+export { Webhook } from './Webhook.js';
+export type { IWebhook } from './Webhook.js';
+export { PasswordReset } from './PasswordReset.js';
+export type { IPasswordReset } from './PasswordReset.js';

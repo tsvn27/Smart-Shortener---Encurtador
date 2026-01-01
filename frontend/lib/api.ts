@@ -67,8 +67,17 @@ class ApiClient {
     return response.json()
   }
 
-  async getLinks(limit = 20, offset = 0) {
-    return this.request<ApiResponse<Link[]>>(`/links?limit=${limit}&offset=${offset}`)
+  async getLinks(limit = 20, offset = 0, options?: { search?: string; status?: string; sortBy?: string; sortOrder?: string }) {
+    const params = new URLSearchParams({
+      limit: String(limit),
+      offset: String(offset),
+    })
+    if (options?.search) params.append('search', options.search)
+    if (options?.status) params.append('status', options.status)
+    if (options?.sortBy) params.append('sortBy', options.sortBy)
+    if (options?.sortOrder) params.append('sortOrder', options.sortOrder)
+    
+    return this.request<ApiResponse<Link[]>>(`/links?${params.toString()}`)
   }
 
   async getLink(id: string) {
@@ -202,6 +211,10 @@ class ApiClient {
 
   async getDashboardStats() {
     return this.request<ApiResponse<DashboardStats>>("/stats/dashboard")
+  }
+
+  async getAnalyticsStats() {
+    return this.request<ApiResponse<AnalyticsStats>>("/stats/analytics")
   }
 
   async getApiKeys() {
@@ -348,6 +361,14 @@ export interface DashboardStats {
   clicksToday: number
   botsBlocked: number
   clicksByDay: { date: string; clicks: number }[]
+}
+
+export interface AnalyticsStats {
+  byCountry: { code: string; country: string; count: number }[]
+  byDevice: { device: string; count: number }[]
+  byBrowser: { browser: string; count: number }[]
+  byHour: { hour: number; count: number }[]
+  suspiciousClicks: number
 }
 
 export interface PublicStats {

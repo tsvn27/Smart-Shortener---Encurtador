@@ -47,7 +47,6 @@ const linkSchema = new Schema<ILink>({
   _id: false,
 });
 
-linkSchema.index({ shortCode: 1 });
 linkSchema.index({ ownerId: 1 });
 linkSchema.index({ state: 1 });
 

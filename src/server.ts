@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -9,6 +10,7 @@ import { logger } from './lib/logger.js';
 import { securityMiddleware, securityHeaders, getClientIP } from './lib/security.js';
 import { handleRedirect, handlePreview } from './handlers/redirect-handler.js';
 import apiV1Routes from './api/v1/routes.js';
+import docsRoutes from './api/docs/openapi.js';
 
 const app = express();
 const PORT = process.env.PORT || 3002;
@@ -18,8 +20,8 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'"],
-      styleSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "https://unpkg.com"],
+      styleSrc: ["'self'", "'unsafe-inline'", "https://unpkg.com"],
       imgSrc: ["'self'", "data:", "https:"],
       connectSrc: ["'self'"],
       fontSrc: ["'self'"],
@@ -101,6 +103,7 @@ app.get('/health', (_, res) => {
 });
 
 app.use('/api/v1', generalLimiter, apiV1Routes);
+app.use('/api/docs', docsRoutes);
 
 app.get('/preview/:code', redirectLimiter, handlePreview);
 app.get('/:code', redirectLimiter, handleRedirect);

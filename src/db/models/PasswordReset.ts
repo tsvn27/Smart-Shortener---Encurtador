@@ -20,7 +20,6 @@ const passwordResetSchema = new Schema<IPasswordReset>({
   _id: false,
 });
 
-passwordResetSchema.index({ token: 1 });
 passwordResetSchema.index({ userId: 1 });
 passwordResetSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
