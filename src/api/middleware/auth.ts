@@ -1,16 +1,21 @@
 import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
-import { createHash } from 'crypto';
+import { createHash, randomBytes } from 'crypto';
 import { queryOne, execute } from '../../db/index.js';
+import { getClientIP, recordSuspiciousActivity, sanitizeInput } from '../../lib/security.js';
+import { logger } from '../../lib/logger.js';
 import type { User, ApiKey, ApiPermission } from '../../types/index.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'dev-secret-change-in-production';
+const COOKIE_NAME = 'auth_session';
+const isProduction = process.env.NODE_ENV === 'production';
 
 declare global {
   namespace Express {
     interface Request {
       user?: User;
       apiKey?: ApiKey;
+      sessionId?: string;
     }
   }
 }
@@ -41,27 +46,110 @@ interface UserRow {
   updated_at: string;
 }
 
-export function requireAuth(req: Request, res: Response, next: NextFunction) {
-  const authHeader = req.headers.authorization;
+const failedAttempts = new Map<string, { count: number; lastAttempt: number }>();
+const LOCKOUT_THRESHOLD = 5;
+const LOCKOUT_DURATION = 15 * 60 * 1000;
+
+function checkLockout(identifier: string): { locked: boolean; remainingTime?: number } {
+  const record = failedAttempts.get(identifier);
+  if (!record) return { locked: false };
   
-  if (authHeader?.startsWith('Bearer ')) {
-    const token = authHeader.slice(7);
-    
+  const timeSinceLastAttempt = Date.now() - record.lastAttempt;
+  if (timeSinceLastAttempt > LOCKOUT_DURATION) {
+    failedAttempts.delete(identifier);
+    return { locked: false };
+  }
+  
+  if (record.count >= LOCKOUT_THRESHOLD) {
+    return { locked: true, remainingTime: LOCKOUT_DURATION - timeSinceLastAttempt };
+  }
+  
+  return { locked: false };
+}
+
+function recordFailedAttempt(identifier: string) {
+  const record = failedAttempts.get(identifier) || { count: 0, lastAttempt: Date.now() };
+  record.count++;
+  record.lastAttempt = Date.now();
+  failedAttempts.set(identifier, record);
+}
+
+function clearFailedAttempts(identifier: string) {
+  failedAttempts.delete(identifier);
+}
+
+export function setAuthCookie(res: Response, token: string) {
+  res.cookie(COOKIE_NAME, token, {
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: 'strict',
+    maxAge: 7 * 24 * 60 * 60 * 1000,
+    path: '/',
+    signed: true,
+  });
+}
+
+export function clearAuthCookie(res: Response) {
+  res.clearCookie(COOKIE_NAME, {
+    httpOnly: true,
+    secure: isProduction,
+    sameSite: 'strict',
+    path: '/',
+  });
+}
+
+export function requireAuth(req: Request, res: Response, next: NextFunction) {
+  const ip = getClientIP(req);
+  
+  const lockout = checkLockout(ip);
+  if (lockout.locked) {
+    return res.status(429).json({ 
+      error: 'Too many failed attempts. Please try again later.',
+      retryAfter: Math.ceil((lockout.remainingTime || 0) / 1000)
+    });
+  }
+  
+  const cookieToken = req.signedCookies?.[COOKIE_NAME];
+  const authHeader = req.headers.authorization;
+  let token: string | null = null;
+  
+  if (cookieToken) {
+    token = cookieToken;
+  } else if (authHeader?.startsWith('Bearer ')) {
+    token = authHeader.slice(7);
+  }
+  
+  if (token) {
     try {
-      const payload = jwt.verify(token, JWT_SECRET) as { userId: string };
+      const payload = jwt.verify(token, JWT_SECRET) as { userId: string; sessionId?: string };
       const user = queryOne<UserRow>('SELECT * FROM users WHERE id = ?', [payload.userId]);
       
       if (user) {
         req.user = rowToUser(user);
+        req.sessionId = payload.sessionId;
+        clearFailedAttempts(ip);
         return next();
       }
-    } catch {}
+    } catch (err) {
+      if (err instanceof jwt.TokenExpiredError) {
+        clearAuthCookie(res);
+        return res.status(401).json({ error: 'Session expired' });
+      }
+      recordFailedAttempt(ip);
+      logger.warn(`Invalid token from ${ip}`);
+    }
   }
   
   const apiKey = req.headers['x-api-key'] as string;
   
   if (apiKey) {
-    const keyHash = createHash('sha256').update(apiKey).digest('hex');
+    const sanitizedKey = sanitizeInput(apiKey);
+    if (sanitizedKey.length < 32 || sanitizedKey.length > 128) {
+      recordSuspiciousActivity(ip);
+      return res.status(401).json({ error: 'Invalid API key format' });
+    }
+    
+    const keyHash = createHash('sha256').update(sanitizedKey).digest('hex');
     const keyRow = queryOne<ApiKeyRow>('SELECT * FROM api_keys WHERE key_hash = ? AND active = 1', [keyHash]);
     
     if (keyRow) {
@@ -76,11 +164,17 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
       if (user) {
         req.user = rowToUser(user);
         req.apiKey = rowToApiKey(keyRow);
+        clearFailedAttempts(ip);
         return next();
       }
+    } else {
+      recordFailedAttempt(ip);
+      recordSuspiciousActivity(ip);
+      logger.warn(`Invalid API key attempt from ${ip}`);
     }
   }
   
+  recordFailedAttempt(ip);
   return res.status(401).json({ error: 'Authentication required' });
 }
 
@@ -94,7 +188,6 @@ export function requirePermission(permission: ApiPermission) {
       return res.status(403).json({ 
         error: 'Insufficient permissions',
         required: permission,
-        available: permissions,
       });
     }
     
@@ -103,7 +196,8 @@ export function requirePermission(permission: ApiPermission) {
 }
 
 export function generateToken(userId: string): string {
-  return jwt.sign({ userId }, JWT_SECRET, { expiresIn: '7d' });
+  const sessionId = randomBytes(16).toString('hex');
+  return jwt.sign({ userId, sessionId }, JWT_SECRET, { expiresIn: '7d' });
 }
 
 export async function hashPassword(password: string): Promise<string> {
@@ -114,6 +208,30 @@ export async function hashPassword(password: string): Promise<string> {
 export async function verifyPassword(password: string, hash: string): Promise<boolean> {
   const bcrypt = await import('bcryptjs');
   return bcrypt.default.compare(password, hash);
+}
+
+export function validatePassword(password: string): { valid: boolean; message?: string } {
+  if (password.length < 8) {
+    return { valid: false, message: 'Password must be at least 8 characters' };
+  }
+  if (password.length > 128) {
+    return { valid: false, message: 'Password too long' };
+  }
+  if (!/[a-z]/.test(password)) {
+    return { valid: false, message: 'Password must contain a lowercase letter' };
+  }
+  if (!/[A-Z]/.test(password)) {
+    return { valid: false, message: 'Password must contain an uppercase letter' };
+  }
+  if (!/[0-9]/.test(password)) {
+    return { valid: false, message: 'Password must contain a number' };
+  }
+  return { valid: true };
+}
+
+export function validateEmail(email: string): boolean {
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return emailRegex.test(email) && email.length <= 254;
 }
 
 function rowToUser(row: UserRow): User {
@@ -142,3 +260,12 @@ function rowToApiKey(row: ApiKeyRow): ApiKey {
     createdAt: new Date(row.created_at),
   };
 }
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, record] of failedAttempts.entries()) {
+    if (now - record.lastAttempt > LOCKOUT_DURATION) {
+      failedAttempts.delete(key);
+    }
+  }
+}, 60000);

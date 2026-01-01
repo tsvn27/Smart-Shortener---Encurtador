@@ -4,6 +4,7 @@ import { Inter, Geist_Mono } from "next/font/google"
 import { Analytics } from "@vercel/analytics/next"
 import { AuthProvider } from "@/lib/auth"
 import { ToastProvider } from "@/components/ui/toast"
+import { CookieBanner } from "@/components/ui/cookie-banner"
 import "./globals.css"
 
 const inter = Inter({
@@ -46,6 +47,7 @@ export default function RootLayout({
         <AuthProvider>
           <ToastProvider>
             {children}
+            <CookieBanner />
           </ToastProvider>
         </AuthProvider>
         <Analytics />

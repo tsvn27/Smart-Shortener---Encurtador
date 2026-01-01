@@ -19,6 +19,9 @@ export function parseContext(req: Request): RedirectContext {
     device = 'bot';
   }
   
+  const referrerHeader = req.headers.referer || req.headers.referrer;
+  const referrer = typeof referrerHeader === 'string' ? referrerHeader : Array.isArray(referrerHeader) ? referrerHeader[0] : undefined;
+  
   return {
     country: geo?.country,
     language: parseLanguage(req.headers['accept-language']),
@@ -28,7 +31,7 @@ export function parseContext(req: Request): RedirectContext {
     os: ua.getOS().name,
     browser: ua.getBrowser().name,
     campaign: (req.query.utm_campaign as string) || (req.query.campaign as string),
-    referrer: req.headers.referer || req.headers.referrer,
+    referrer,
   };
 }
 

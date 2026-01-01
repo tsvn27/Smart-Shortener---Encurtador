@@ -32,6 +32,7 @@ import {
   Sparkles,
   ArrowRight,
   Loader2,
+  Download,
 } from "lucide-react"
 import {
   ResponsiveContainer,
@@ -220,6 +221,14 @@ export function LinkDetailContent() {
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
+          <Button 
+            variant="outline" 
+            className="gap-2 border-white/[0.08] hover:bg-white/[0.04] bg-transparent h-10"
+            onClick={() => window.open(`${process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3002/api/v1'}/links/${link.id}/export`, '_blank')}
+          >
+            <Download className="w-4 h-4" />
+            Exportar
+          </Button>
           <Button 
             variant="outline" 
             className="gap-2 border-white/[0.08] hover:bg-white/[0.04] bg-transparent h-10"

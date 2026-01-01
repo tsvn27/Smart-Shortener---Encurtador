@@ -6,15 +6,32 @@ import { Logo } from "@/components/ui/logo"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { ArrowRight, Link2, BarChart3, Zap, Globe, MousePointer, Copy, Check } from "lucide-react"
+import { api, PublicStats } from "@/lib/api"
+
+function formatNumber(num: number): string {
+  if (num >= 1000000) {
+    return (num / 1000000).toFixed(1).replace(/\.0$/, '') + 'M'
+  }
+  if (num >= 1000) {
+    return (num / 1000).toFixed(1).replace(/\.0$/, '') + 'K'
+  }
+  return num.toString()
+}
 
 export default function Home() {
   const [mounted, setMounted] = useState(false)
   const [scrollY, setScrollY] = useState(0)
+  const [stats, setStats] = useState<PublicStats | null>(null)
 
   useEffect(() => {
     setMounted(true)
     const handleScroll = () => setScrollY(window.scrollY)
     window.addEventListener("scroll", handleScroll, { passive: true })
+    
+    api.getPublicStats()
+      .then(res => setStats(res.data))
+      .catch(() => {})
+    
     return () => window.removeEventListener("scroll", handleScroll)
   }, [])
 
@@ -49,7 +66,9 @@ export default function Home() {
               {/* Badge */}
               <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/[0.03] border border-white/[0.06] mb-6">
                 <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-                <span className="text-xs text-muted-foreground">+12 milhões de links criados</span>
+                <span className="text-xs text-muted-foreground">
+                  {stats ? `+${formatNumber(stats.totalLinks)} links criados` : 'Carregando...'}
+                </span>
               </div>
 
               <h1 className="text-4xl sm:text-5xl lg:text-6xl font-bold text-foreground tracking-tight mb-4">
@@ -180,16 +199,22 @@ export default function Home() {
           <div className="max-w-4xl mx-auto">
             <div className="grid grid-cols-3 gap-8 text-center">
               <div>
-                <p className="text-4xl font-bold text-foreground mb-1">12M+</p>
+                <p className="text-4xl font-bold text-foreground mb-1">
+                  {stats ? formatNumber(stats.totalLinks) : '—'}
+                </p>
                 <p className="text-sm text-muted-foreground">links criados</p>
               </div>
               <div>
-                <p className="text-4xl font-bold text-foreground mb-1">847M</p>
+                <p className="text-4xl font-bold text-foreground mb-1">
+                  {stats ? formatNumber(stats.totalClicks) : '—'}
+                </p>
                 <p className="text-sm text-muted-foreground">cliques rastreados</p>
               </div>
               <div>
-                <p className="text-4xl font-bold text-foreground mb-1">99.9%</p>
-                <p className="text-sm text-muted-foreground">uptime</p>
+                <p className="text-4xl font-bold text-foreground mb-1">
+                  {stats ? formatNumber(stats.totalUsers) : '—'}
+                </p>
+                <p className="text-sm text-muted-foreground">usuários ativos</p>
               </div>
             </div>
           </div>

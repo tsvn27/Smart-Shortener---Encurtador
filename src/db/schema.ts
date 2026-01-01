@@ -149,4 +149,16 @@ CREATE TABLE IF NOT EXISTS analytics_rollups (
 
 CREATE INDEX IF NOT EXISTS idx_rollups_link ON analytics_rollups(link_id);
 CREATE INDEX IF NOT EXISTS idx_rollups_period ON analytics_rollups(period, period_start);
+
+CREATE TABLE IF NOT EXISTS password_resets (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL REFERENCES users(id),
+  token TEXT UNIQUE NOT NULL,
+  expires_at DATETIME NOT NULL,
+  used INTEGER DEFAULT 0,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS idx_password_resets_token ON password_resets(token);
+CREATE INDEX IF NOT EXISTS idx_password_resets_user ON password_resets(user_id);
 `;

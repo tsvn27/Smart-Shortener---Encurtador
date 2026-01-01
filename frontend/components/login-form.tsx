@@ -4,6 +4,7 @@ import type React from "react"
 
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
+import Link from "next/link"
 import { Logo } from "@/components/ui/logo"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -241,9 +242,9 @@ export function LoginForm() {
                   Senha
                 </Label>
                 {!isRegister && (
-                  <button type="button" className="text-xs text-primary/80 hover:text-primary transition-colors">
+                  <Link href="/forgot-password" className="text-xs text-primary/80 hover:text-primary transition-colors">
                     Esqueceu a senha?
-                  </button>
+                  </Link>
                 )}
               </div>
               <div className="relative">

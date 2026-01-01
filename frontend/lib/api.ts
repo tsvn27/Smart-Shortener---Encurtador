@@ -127,6 +127,20 @@ class ApiClient {
     return this.request<ApiResponse<User>>("/auth/me")
   }
 
+  async forgotPassword(email: string) {
+    return this.request<ApiResponse<{ message: string }>>("/auth/forgot-password", {
+      method: "POST",
+      body: JSON.stringify({ email }),
+    })
+  }
+
+  async resetPassword(token: string, password: string) {
+    return this.request<ApiResponse<{ message: string }>>("/auth/reset-password", {
+      method: "POST",
+      body: JSON.stringify({ token, password }),
+    })
+  }
+
   async changePassword(currentPassword: string, newPassword: string) {
     return this.request<ApiResponse<{ message: string }>>("/auth/change-password", {
       method: "POST",
@@ -143,6 +157,10 @@ class ApiClient {
 
   async deleteAccount() {
     return this.request<void>("/auth/account", { method: "DELETE" })
+  }
+
+  async getPublicStats() {
+    return this.request<ApiResponse<PublicStats>>("/stats/public")
   }
 
   async getDashboardStats() {
@@ -291,6 +309,12 @@ export interface DashboardStats {
   clicksToday: number
   botsBlocked: number
   clicksByDay: { date: string; clicks: number }[]
+}
+
+export interface PublicStats {
+  totalLinks: number
+  totalClicks: number
+  totalUsers: number
 }
 
 export interface ApiKeyItem {

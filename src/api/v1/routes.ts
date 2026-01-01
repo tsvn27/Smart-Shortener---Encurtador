@@ -1,12 +1,17 @@
 import { Router } from 'express';
 import { z } from 'zod';
 import { nanoid } from 'nanoid';
-import { createHash } from 'crypto';
+import { createHash, randomBytes } from 'crypto';
 import { linkRepository } from '../../repositories/link-repository.js';
 import { clickRepository } from '../../repositories/click-repository.js';
 import { validateBody, validateQuery } from '../middleware/validation.js';
-import { requireAuth, requirePermission, generateToken, hashPassword, verifyPassword } from '../middleware/auth.js';
+import { requireAuth, requirePermission, generateToken, hashPassword, verifyPassword, validatePassword, validateEmail, setAuthCookie, clearAuthCookie } from '../middleware/auth.js';
 import { queryOne, queryAll, execute } from '../../db/index.js';
+import { validateUrl, sanitizeUrl } from '../../lib/url-validator.js';
+import { sendPasswordResetEmail } from '../../lib/email.js';
+import { logger } from '../../lib/logger.js';
+import { sanitizeInput, getClientIP, recordSuspiciousActivity } from '../../lib/security.js';
+import { authLimiter, createLinkLimiter, passwordResetLimiter, apiKeyLimiter, searchLimiter } from '../../lib/rate-limiter.js';
 
 const router = Router();
 
@@ -43,21 +48,42 @@ interface WebhookRow {
   created_at: string;
 }
 
+interface PasswordResetRow {
+  id: string;
+  user_id: string;
+  token: string;
+  expires_at: string;
+  used: number;
+}
+
 const loginSchema = z.object({
-  email: z.string().email(),
-  password: z.string().min(6),
+  email: z.string().email().max(254),
+  password: z.string().min(6).max(128),
 });
 
 const registerSchema = z.object({
-  name: z.string().min(2),
-  email: z.string().email(),
-  password: z.string().min(6),
+  name: z.string().min(2).max(100),
+  email: z.string().email().max(254),
+  password: z.string().min(8).max(128),
 });
 
-router.post('/auth/register', validateBody(registerSchema), async (req, res) => {
+router.post('/auth/register', authLimiter, validateBody(registerSchema), async (req, res) => {
   const { name, email, password } = req.body;
+  const ip = getClientIP(req);
   
-  const existing = queryOne<UserRow>('SELECT id FROM users WHERE email = ?', [email]);
+  const sanitizedEmail = sanitizeInput(email.toLowerCase().trim());
+  const sanitizedName = sanitizeInput(name.trim());
+  
+  if (!validateEmail(sanitizedEmail)) {
+    return res.status(400).json({ error: 'Invalid email format' });
+  }
+  
+  const passwordValidation = validatePassword(password);
+  if (!passwordValidation.valid) {
+    return res.status(400).json({ error: passwordValidation.message });
+  }
+  
+  const existing = queryOne<UserRow>('SELECT id FROM users WHERE email = ?', [sanitizedEmail]);
   if (existing) {
     return res.status(409).json({ error: 'Email already registered' });
   }
@@ -67,11 +93,14 @@ router.post('/auth/register', validateBody(registerSchema), async (req, res) => 
   
   execute(
     'INSERT INTO users (id, email, password_hash, name) VALUES (?, ?, ?, ?)',
-    [id, email, passwordHash, name]
+    [id, sanitizedEmail, passwordHash, sanitizedName]
   );
   
   const token = generateToken(id);
   const user = queryOne<UserRow>('SELECT * FROM users WHERE id = ?', [id])!;
+  
+  setAuthCookie(res, token);
+  logger.info(`New user registered: ${sanitizedEmail}`, { ip });
   
   res.status(201).json({
     data: {
@@ -87,20 +116,28 @@ router.post('/auth/register', validateBody(registerSchema), async (req, res) => 
   });
 });
 
-router.post('/auth/login', validateBody(loginSchema), async (req, res) => {
+router.post('/auth/login', authLimiter, validateBody(loginSchema), async (req, res) => {
   const { email, password } = req.body;
+  const ip = getClientIP(req);
   
-  const user = queryOne<UserRow>('SELECT * FROM users WHERE email = ?', [email]);
+  const sanitizedEmail = sanitizeInput(email.toLowerCase().trim());
+  
+  const user = queryOne<UserRow>('SELECT * FROM users WHERE email = ?', [sanitizedEmail]);
   if (!user) {
+    logger.warn(`Failed login attempt for non-existent email`, { ip });
     return res.status(401).json({ error: 'Invalid credentials' });
   }
   
   const valid = await verifyPassword(password, user.password_hash);
   if (!valid) {
+    logger.warn(`Failed login attempt for ${sanitizedEmail}`, { ip });
+    recordSuspiciousActivity(ip);
     return res.status(401).json({ error: 'Invalid credentials' });
   }
   
   const token = generateToken(user.id);
+  setAuthCookie(res, token);
+  logger.info(`User logged in: ${sanitizedEmail}`, { ip });
   
   res.json({
     data: {
@@ -114,6 +151,88 @@ router.post('/auth/login', validateBody(loginSchema), async (req, res) => {
       },
     },
   });
+});
+
+router.post('/auth/logout', requireAuth, (req, res) => {
+  clearAuthCookie(res);
+  res.json({ data: { message: 'Logged out successfully' } });
+});
+
+const forgotPasswordSchema = z.object({
+  email: z.string().email().max(254),
+});
+
+router.post('/auth/forgot-password', passwordResetLimiter, validateBody(forgotPasswordSchema), async (req, res) => {
+  const { email } = req.body;
+  const ip = getClientIP(req);
+  
+  const sanitizedEmail = sanitizeInput(email.toLowerCase().trim());
+  const user = queryOne<UserRow>('SELECT * FROM users WHERE email = ?', [sanitizedEmail]);
+  
+  res.json({ data: { message: 'If the email exists, a reset link will be sent' } });
+  
+  if (!user) {
+    logger.info(`Password reset requested for non-existent email`, { ip });
+    return;
+  }
+  
+  const existingReset = queryOne<PasswordResetRow>(
+    'SELECT * FROM password_resets WHERE user_id = ? AND used = 0 AND expires_at > ?',
+    [user.id, new Date().toISOString()]
+  );
+  
+  if (existingReset) {
+    logger.info(`Password reset already pending for ${sanitizedEmail}`, { ip });
+    return;
+  }
+  
+  const token = randomBytes(32).toString('hex');
+  const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+  
+  execute(
+    'INSERT INTO password_resets (id, user_id, token, expires_at) VALUES (?, ?, ?, ?)',
+    [nanoid(), user.id, token, expiresAt]
+  );
+  
+  logger.info(`Password reset token generated for ${sanitizedEmail}`, { ip });
+  await sendPasswordResetEmail(sanitizedEmail, token);
+});
+
+const resetPasswordSchema = z.object({
+  token: z.string().min(64).max(64),
+  password: z.string().min(8).max(128),
+});
+
+router.post('/auth/reset-password', passwordResetLimiter, validateBody(resetPasswordSchema), async (req, res) => {
+  const { token, password } = req.body;
+  const ip = getClientIP(req);
+  
+  const passwordValidation = validatePassword(password);
+  if (!passwordValidation.valid) {
+    return res.status(400).json({ error: passwordValidation.message });
+  }
+  
+  const reset = queryOne<PasswordResetRow>(
+    'SELECT * FROM password_resets WHERE token = ? AND used = 0 AND expires_at > ?',
+    [token, new Date().toISOString()]
+  );
+  
+  if (!reset) {
+    logger.warn(`Invalid password reset attempt`, { ip });
+    recordSuspiciousActivity(ip);
+    return res.status(400).json({ error: 'Invalid or expired token' });
+  }
+  
+  const passwordHash = await hashPassword(password);
+  
+  execute('UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?', 
+    [passwordHash, new Date().toISOString(), reset.user_id]);
+  execute('UPDATE password_resets SET used = 1 WHERE id = ?', [reset.id]);
+  execute('DELETE FROM password_resets WHERE user_id = ? AND id != ?', [reset.user_id, reset.id]);
+  
+  logger.info(`Password reset completed for user ${reset.user_id}`, { ip });
+  
+  res.json({ data: { message: 'Password reset successfully' } });
 });
 
 router.get('/auth/me', requireAuth, (req, res) => {
@@ -130,13 +249,19 @@ router.get('/auth/me', requireAuth, (req, res) => {
 });
 
 const changePasswordSchema = z.object({
-  currentPassword: z.string().min(1),
-  newPassword: z.string().min(6),
+  currentPassword: z.string().min(1).max(128),
+  newPassword: z.string().min(8).max(128),
 });
 
-router.post('/auth/change-password', requireAuth, validateBody(changePasswordSchema), async (req, res) => {
+router.post('/auth/change-password', requireAuth, authLimiter, validateBody(changePasswordSchema), async (req, res) => {
   const { currentPassword, newPassword } = req.body;
   const userId = req.user!.id;
+  const ip = getClientIP(req);
+  
+  const passwordValidation = validatePassword(newPassword);
+  if (!passwordValidation.valid) {
+    return res.status(400).json({ error: passwordValidation.message });
+  }
   
   const user = queryOne<UserRow>('SELECT * FROM users WHERE id = ?', [userId]);
   if (!user) {
@@ -145,11 +270,16 @@ router.post('/auth/change-password', requireAuth, validateBody(changePasswordSch
   
   const valid = await verifyPassword(currentPassword, user.password_hash);
   if (!valid) {
+    logger.warn(`Failed password change attempt for user ${userId}`, { ip });
+    recordSuspiciousActivity(ip);
     return res.status(401).json({ error: 'Current password is incorrect' });
   }
   
   const newPasswordHash = await hashPassword(newPassword);
   execute('UPDATE users SET password_hash = ?, updated_at = ? WHERE id = ?', [newPasswordHash, new Date().toISOString(), userId]);
+  
+  clearAuthCookie(res);
+  logger.info(`Password changed for user ${userId}`, { ip });
   
   res.json({ data: { message: 'Password changed successfully' } });
 });
@@ -189,6 +319,20 @@ router.delete('/auth/account', requireAuth, async (req, res) => {
   execute('DELETE FROM users WHERE id = ?', [userId]);
   
   res.status(204).send();
+});
+
+router.get('/stats/public', searchLimiter, (_, res) => {
+  const totalLinks = queryOne<{ count: number }>('SELECT COUNT(*) as count FROM links');
+  const totalClicks = queryOne<{ total: number }>('SELECT COALESCE(SUM(total_clicks), 0) as total FROM links');
+  const totalUsers = queryOne<{ count: number }>('SELECT COUNT(*) as count FROM users');
+  
+  res.json({
+    data: {
+      totalLinks: totalLinks?.count || 0,
+      totalClicks: totalClicks?.total || 0,
+      totalUsers: totalUsers?.count || 0,
+    },
+  });
 });
 
 router.get('/stats/dashboard', requireAuth, (req, res) => {
@@ -303,9 +447,17 @@ router.get('/links',
 router.post('/links',
   requireAuth,
   requirePermission('links:write'),
+  createLinkLimiter,
   validateBody(createLinkSchema),
   (req, res) => {
     const data = req.body as z.infer<typeof createLinkSchema>;
+    
+    const urlValidation = validateUrl(data.url);
+    if (!urlValidation.valid) {
+      return res.status(400).json({ error: urlValidation.error });
+    }
+    
+    const sanitizedUrl = sanitizeUrl(data.url);
     
     if (data.customCode) {
       const existing = linkRepository.findByShortCode(data.customCode);
@@ -315,7 +467,7 @@ router.post('/links',
     }
     
     const link = linkRepository.create({
-      originalUrl: data.url,
+      originalUrl: sanitizedUrl,
       ownerId: req.user!.id,
       customCode: data.customCode,
       rules: data.rules as any,
@@ -451,12 +603,43 @@ router.get('/links/:id/clicks',
   }
 );
 
+router.get('/links/:id/export',
+  requireAuth,
+  requirePermission('analytics:read'),
+  (req, res) => {
+    const link = linkRepository.findById(req.params.id);
+    
+    if (!link || link.ownerId !== req.user!.id) {
+      return res.status(404).json({ error: 'Link not found' });
+    }
+    
+    const clicks = clickRepository.findByLink(link.id, 10000, 0);
+    
+    const headers = ['Data', 'País', 'Dispositivo', 'Navegador', 'Referrer', 'Bot', 'Suspeito'];
+    const rows = clicks.map(c => [
+      c.timestamp,
+      c.country || '',
+      c.device,
+      c.browser,
+      c.referrer || 'Direto',
+      c.isBot ? 'Sim' : 'Não',
+      c.isSuspicious ? 'Sim' : 'Não',
+    ]);
+    
+    const csv = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="${link.shortCode}-analytics.csv"`);
+    res.send(csv);
+  }
+);
+
 const createApiKeySchema = z.object({
   name: z.string().min(1).max(50),
   permissions: z.array(z.string()).default(['links:read']),
 });
 
-router.get('/api-keys', requireAuth, (req, res) => {
+router.get('/api-keys', requireAuth, searchLimiter, (req, res) => {
   const keys = queryAll<ApiKeyRow>(
     'SELECT id, name, permissions_json, last_used_at, created_at FROM api_keys WHERE owner_id = ? AND active = 1',
     [req.user!.id]
@@ -474,8 +657,20 @@ router.get('/api-keys', requireAuth, (req, res) => {
   });
 });
 
-router.post('/api-keys', requireAuth, validateBody(createApiKeySchema), (req, res) => {
+router.post('/api-keys', requireAuth, apiKeyLimiter, validateBody(createApiKeySchema), (req, res) => {
   const { name, permissions } = req.body;
+  const ip = getClientIP(req);
+  
+  const sanitizedName = sanitizeInput(name.trim());
+  
+  const existingCount = queryOne<{ count: number }>(
+    'SELECT COUNT(*) as count FROM api_keys WHERE owner_id = ? AND active = 1',
+    [req.user!.id]
+  );
+  
+  if ((existingCount?.count || 0) >= 10) {
+    return res.status(400).json({ error: 'Maximum API keys limit reached (10)' });
+  }
   
   const id = nanoid();
   const rawKey = `sk_live_${nanoid(32)}`;
@@ -483,13 +678,15 @@ router.post('/api-keys', requireAuth, validateBody(createApiKeySchema), (req, re
   
   execute(
     'INSERT INTO api_keys (id, key_hash, name, owner_id, permissions_json) VALUES (?, ?, ?, ?, ?)',
-    [id, keyHash, name, req.user!.id, JSON.stringify(permissions)]
+    [id, keyHash, sanitizedName, req.user!.id, JSON.stringify(permissions)]
   );
+  
+  logger.info(`API key created for user ${req.user!.id}`, { ip });
   
   res.status(201).json({
     data: {
       id,
-      name,
+      name: sanitizedName,
       key: rawKey,
       permissions,
       createdAt: new Date().toISOString(),
