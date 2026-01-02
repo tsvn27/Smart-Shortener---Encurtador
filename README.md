@@ -9,7 +9,7 @@
 
 **Encurtador de links profissional com analytics avançado, proteção contra bots e autenticação 2FA.**
 
-[Demo](https://smartshortener.vercel.app) · [API Docs](https://smart-shortener-encurtador-production.up.railway.app/api/docs) · [Reportar Bug](https://github.com/tsvn27/Smart-Shortener---Encurtador/issues)
+[Test](https://smartshortener.vercel.app) · [API Docs](https://smart-shortener-encurtador-production.up.railway.app/api/docs) · [Reportar Bug](https://github.com/tsvn27/Smart-Shortener---Encurtador/issues)
 
 </div>
 
