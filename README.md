@@ -310,26 +310,9 @@ O Smart Shortener implementa múltiplas camadas de segurança:
 └── .env.example           # Exemplo de configuração
 ```
 
----
-
-## 🤝 Contribuindo
-
-1. Fork o projeto
-2. Crie sua branch (`git checkout -b feature/nova-feature`)
-3. Commit suas mudanças (`git commit -m 'Add nova feature'`)
-4. Push para a branch (`git push origin feature/nova-feature`)
-5. Abra um Pull Request
-
----
-
 ## 📄 Licença
 
 MIT © [tsvn27](https://github.com/tsvn27)
 
 ---
 
-<div align="center">
-
-**Feito com ❤️ e muito ☕**
-
-</div>
