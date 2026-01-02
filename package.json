@@ -7,7 +7,8 @@
     "dev": "tsx watch src/server.ts",
     "dev:frontend": "cd frontend && pnpm dev",
     "dev:all": "concurrently \"npm run dev\" \"pnpm --dir frontend dev\"",
-    "build": "tsc && cd frontend && pnpm build",
+    "build": "tsc",
+    "build:all": "tsc && cd frontend && pnpm build",
     "start": "node dist/server.js",
     "seed": "tsx src/db/seed.ts",
     "install:all": "npm install && cd frontend && pnpm install"
