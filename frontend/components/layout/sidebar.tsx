@@ -4,7 +4,7 @@ import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import { cn } from "@/lib/utils"
 import { Logo } from "@/components/ui/logo"
-import { LayoutDashboard, Link2, BarChart3, Settings, PlusCircle, LogOut, Menu, X } from "lucide-react"
+import { LayoutDashboard, Link2, BarChart3, Settings, PlusCircle, LogOut, Menu, X, FileCode2 } from "lucide-react"
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
@@ -16,6 +16,8 @@ const navItems = [
   { href: "/analytics", label: "Analytics", icon: BarChart3 },
   { href: "/settings", label: "Configurações", icon: Settings },
 ]
+
+const API_DOCS_URL = process.env.NEXT_PUBLIC_API_URL?.replace('/api/v1', '/api/docs') || '/api/docs'
 
 export function Sidebar() {
   const pathname = usePathname()
@@ -104,7 +106,7 @@ export function Sidebar() {
         </nav>
 
         {/* Create link button */}
-        <div className="p-4 border-t border-white/[0.06]">
+        <div className="p-4 border-t border-white/[0.06] space-y-2">
           <Link href="/links/new" onClick={() => setMobileOpen(false)}>
             <Button className="w-full gap-2 bg-primary hover:bg-primary/90 text-primary-foreground h-11 relative overflow-hidden group">
               <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-500" />
@@ -112,6 +114,10 @@ export function Sidebar() {
               <span className="relative">Novo Link</span>
             </Button>
           </Link>
+          <a href={API_DOCS_URL} target="_blank" rel="noopener noreferrer" className="flex items-center justify-center gap-2 w-full h-9 text-xs text-muted-foreground hover:text-foreground transition-colors rounded-lg hover:bg-white/[0.04]">
+            <FileCode2 className="w-3.5 h-3.5" />
+            API Docs
+          </a>
         </div>
 
         {/* User section */}

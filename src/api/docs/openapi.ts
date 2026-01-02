@@ -80,6 +80,10 @@ router.get('/', (_req, res) => {
     return acc;
   }, {} as Record<string, typeof endpoints>);
 
+    const baseUrl = process.env.NODE_ENV === 'production' 
+    ? `https://${req.get('host')}` 
+    : 'http://localhost:3002';
+
   const html = `<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -170,8 +174,8 @@ router.get('/', (_req, res) => {
       <p class="subtitle">Documentação completa da API REST do Smart Shortener</p>
       <div class="base-url">
         <span>Base URL:</span>
-        <code>http://localhost:3002/api/v1</code>
-        <button class="copy-btn" onclick="navigator.clipboard.writeText('http://localhost:3002/api/v1')">
+        <code>${baseUrl}/api/v1</code>
+        <button class="copy-btn" onclick="navigator.clipboard.writeText('${baseUrl}/api/v1')">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
           </svg>

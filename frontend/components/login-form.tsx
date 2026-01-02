@@ -29,6 +29,7 @@ export function LoginForm() {
   const [name, setName] = useState("")
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
+  const [apiKey, setApiKey] = useState("")
 
   useEffect(() => {
     setMounted(true)
@@ -57,6 +58,36 @@ export function LoginForm() {
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro ao fazer login")
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  const handleApiKeyLogin = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setIsLoading(true)
+    setError("")
+    
+    try {
+      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/auth/me`, {
+        headers: {
+          'X-API-Key': apiKey,
+        },
+      })
+      
+      if (!response.ok) {
+        throw new Error('Chave de API inválida')
+      }
+      
+      const data = await response.json()
+      
+      // Salva a API key no localStorage para uso futuro
+      localStorage.setItem('api_key', apiKey)
+      localStorage.setItem('auth_token', apiKey)
+      
+      router.push("/dashboard")
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Chave de API inválida")
     } finally {
       setIsLoading(false)
     }
@@ -165,7 +196,13 @@ export function LoginForm() {
               <p className="text-sm text-muted-foreground">Cole sua chave de acesso</p>
             </div>
 
-            <form onSubmit={handleSubmit} className="space-y-5">
+            {error && (
+              <div className="p-3 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-400 text-sm">
+                {error}
+              </div>
+            )}
+
+            <form onSubmit={handleApiKeyLogin} className="space-y-5">
               <div className="space-y-2">
                 <Label htmlFor="apiKey" className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
                   API Key
@@ -175,6 +212,8 @@ export function LoginForm() {
                     id="apiKey"
                     type={showPassword ? "text" : "password"}
                     placeholder="sk_live_..."
+                    value={apiKey}
+                    onChange={(e) => setApiKey(e.target.value)}
                     onFocus={() => setFocusedField("apiKey")}
                     onBlur={() => setFocusedField(null)}
                     className={cn(
