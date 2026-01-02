@@ -65,7 +65,7 @@ const endpoints = [
 
 router.get('/openapi.json', (_req, res) => res.json(openApiSpec));
 
-router.get('/', (_req, res) => {
+router.get('/', (req, res) => {
   const methodColors: Record<string, string> = {
     GET: '#22c55e',
     POST: '#6366f1',
@@ -80,9 +80,9 @@ router.get('/', (_req, res) => {
     return acc;
   }, {} as Record<string, typeof endpoints>);
 
-    const baseUrl = process.env.NODE_ENV === 'production' 
+  const baseUrl = process.env.NODE_ENV === 'production' 
     ? `https://${req.get('host')}` 
-    : 'http://localhost:3002';
+    : `http://${req.get('host')}`;
 
   const html = `<!DOCTYPE html>
 <html lang="pt-BR">
